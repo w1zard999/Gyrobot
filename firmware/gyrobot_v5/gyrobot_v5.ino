@@ -16,6 +16,11 @@ static uint32_t hzCnt = 0, hzT = 0;
 uint32_t hzVal = 0;
 static bool lastMotorsOn = false;
 
+void resyncCtrl() {   // после блокирующих операций (калибровка, burst-дамп)
+  tCtrl = micros();
+  hzCnt = 0; hzT = tCtrl;
+}
+
 void defaults() {
   cfg.kp = 12; cfg.kd = 0.30f; cfg.zero = 0; cfg.alpha = 0.98f;
   cfg.dead = 12; cfg.maxpwm = 200; cfg.fall = 35;
@@ -23,8 +28,8 @@ void defaults() {
   cfg.kvi = 0; cfg.kii = 0; cfg.tiltmax = 5; cfg.kpos = 0;
   cfg.sfilt = 0.85f; cfg.kth = 0;
   cfg.ktp = 0; cfg.ktd = 0;
-  cfg.esA = 1; cfg.esB = -1; cfg.mvA = -1; cfg.mvB = -1;   // живые значения 2026-09-17
-  cfg.gbx = 319; cfg.gby = 46; cfg.gbz = 33;
+  cfg.esA = -1; cfg.esB = 1; cfg.mvA = 1; cfg.mvB = 1;   // знаки, тест 2026-09-17
+  cfg.gbx = 573.7f; cfg.gby = 90.4f; cfg.gbz = 49.2f;    // перекалибровано 2026-09-17
   cfg.abx = 234; cfg.aby = -14808; cfg.abz = 426;
   cfg.axu = 3; cfg.axf = 2; cfg.axg = 1; cfg.axt = 3;
 }
@@ -95,7 +100,11 @@ void setup() {
 
 void loop() {
   uint32_t now = micros();
-  if (now - tCtrl >= 5000) {           // 200 Гц
+  int32_t dtc = (int32_t)(now - tCtrl);
+  if (dtc >= 5000) {
+    if (dtc > 100000) {           // после блокирующей операции — без «догона»
+      resyncCtrl();
+    } else {
     tCtrl += 5000;
     imuRead();
     cyc++;
@@ -113,6 +122,7 @@ void loop() {
 
     if (cyc % TELE_DIV == 0) teleLine();
     burstTick();
+    }
   }
   serialPoll();
 }
