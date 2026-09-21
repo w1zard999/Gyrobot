@@ -19,11 +19,11 @@ t0 = time.time()
 time.sleep(a.boot)
 ser.reset_input_buffer()
 for cmd in [c.strip() for c in a.cmds.split(';') if c.strip()]:
-    ser.write((cmd + '\n').encode())
+    ser.write((cmd.replace('=', ' ') + '\n').encode())   # "kp=0.6" -> "kp 0.6"
     ser.flush()
     time.sleep(a.gap)
+out = open(a.out, 'a', encoding='utf-8') if a.out else None
 end = time.time() + a.listen
-lines = []
 while time.time() < end:
     data = ser.readline()
     if data:
@@ -32,8 +32,9 @@ while time.time() < end:
             print(line)
         except UnicodeEncodeError:
             print(line.encode('ascii', 'replace').decode())
-        lines.append(line)
+        if out:
+            out.write(line + '\n')
+            out.flush()          # писать на лету: убитый процесс лог не теряет
 ser.close()
-if a.out:
-    with open(a.out, 'a', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
+if out:
+    out.close()
