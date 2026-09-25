@@ -31,6 +31,13 @@ uint16_t loopHz = 0;
 float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
 
+// ---------- WASD (BT/USB) ----------
+float drv = 2.5f, trn = 35.0f;      // целевой наклон, °; дифференциал поворота, ШИМ
+float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
+float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
+bool keyW = false, keyS = false, keyA = false, keyD = false;
+uint32_t cmdDeadline = 0;
+
 void applyParam(const char* line) {
   char name[8]; uint8_t i = 0;
   while (line[i] && line[i] != ' ' && i < 7) { name[i] = line[i]; i++; }
@@ -67,6 +74,17 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "ksi") && v >= 0) { ksi = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "esa") && fabs(v) == 1) { esA = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "esb") && fabs(v) == 1) { esB = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "drv") && v >= -10 && v <= 10) { drv = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "trn") && v >= -100 && v <= 100) { trn = v; Serial.println(F("ok"));
+  } else if (name[1] == 0 && strchr("wsad", name[0])) {
+    if (name[0] == 'w') keyW = true;
+    if (name[0] == 's') keyS = true;
+    if (name[0] == 'a') keyA = true;
+    if (name[0] == 'd') keyD = true;
+    cmdDeadline = millis() + 300;
+    drvTarget = (keyW ? drv : 0) - (keyS ? drv : 0);
+    trnTarget = (keyD ? trn : 0) - (keyA ? trn : 0);
+    Serial.println(F("ok"));
   }
 }
 
@@ -104,6 +122,10 @@ void loop() {
   iterCnt++; hzCnt++;
   if (millis() - hzMark >= 1000) { hzMark = millis(); loopHz = hzCnt; hzCnt = 0; }
   paramsPoll();                          // живая настройка: "kd 0.005", "p"
+  if (millis() > cmdDeadline && (keyW || keyS || keyA || keyD)) {   // поток букв кончился — стоим
+    keyW = keyS = keyA = keyD = false;
+    drvTarget = 0; trnTarget = 0;
+  }
   speedTick();                           // окно 40 мс: скорость/путь (и в idle)
 
   // --- после падения: моторы стоят, ждём секунду стойки вертикально ---
