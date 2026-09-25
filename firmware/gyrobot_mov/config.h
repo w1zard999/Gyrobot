@@ -40,6 +40,7 @@ extern float atr;                            // выравнивание мом�
 extern float atrb;                           // то же при движении назад (сериал)
 extern float drv, trn;                       // WASD: наклон и поворот (сериал)
 extern float trnTarget;                      // угасание yawInt в speed.h
+extern float drvNow, trnNow;                 // сглаженные значения (motors.h, телеметрия)
 // Энкодерный контур (тоже живые: ksp/ksi — вклад, esa/esb — знаки каналов)
 extern float esA, esB, ksp, ksi;
 extern float kdyaw, kdyi;                    // курс: демпфер вращения + удержание

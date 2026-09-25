@@ -47,4 +47,5 @@ void speedTick() {
   yawInt   = constrain(yawInt + yaw, -2000.0f, 2000.0f);
   speedTerm = ksp * speedFilt + ksi * speedInt;
   yawTerm   = kdyaw * yawFilt + kdyi * yawInt;
+  if (trnTarget != 0) yawInt *= 0.9f;   // водитель рулит — курс-холд молчит
 }

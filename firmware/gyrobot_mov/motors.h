@@ -22,9 +22,9 @@ void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 ст
   int p = constrain(abs(pwm), 0, 255);
   digitalWrite(AIN1, fwd); digitalWrite(AIN2, !fwd);
   digitalWrite(BIN1, fwd); digitalWrite(BIN2, !fwd);
-  // дифференциал курса: yawTerm -> левому +, правому −. Только при вращении
-  // моторов (p>0), на месте корректировать нечем — иначе гул
-  int c = (p > 0) ? (int)constrain(yawTerm, -30.0f, 30.0f) : 0;
+  // дифференциал: yawTerm (курс) + trnNow (водитель). Кап ±60. Без ворот p>0:
+  // при p=0 дифференциал = поворот на месте — штатно
+  int c = (int)constrain(yawTerm + trnNow, -60.0f, 60.0f);
   analogWrite(PWMA, constrain(p + (int)(fwd ? atr : atrb) + c, 0, 255));
   analogWrite(PWMB, constrain(p - c, 0, 255));
 }

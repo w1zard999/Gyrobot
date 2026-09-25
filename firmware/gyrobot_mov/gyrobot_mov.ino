@@ -164,12 +164,16 @@ void loop() {
   uint32_t t2 = timer; timer = micros();
   dt = (timer - t2) * 0.000001f;
   if (dt > 0.02f) dt = 0.02f;            // защита от застрявшего dt
+  drvNow += (drvTarget - drvNow) * (dt / 0.3f);   // TAU 0.3 c: ступенька = качели
+  trnNow += (trnTarget - trnNow) * (dt / 0.3f);
   rate = (GyX - gyroBiasX) / GYR_LSB;    // + = кренится вперёд
-  GyYsum += rate * dt + (accAngle() + balancing_zerro - GyYsum) * (dt / TAU_ACC);
+  GyYsum += rate * dt + (accAngle() + balancing_zerro + drvNow - GyYsum) * (dt / TAU_ACC);
 
   // 3. Падение
   if (fabs(GyYsum) > FALL_DEG) {
     armed = false; uprightSince = 0;
+    drvNow = 0; trnNow = 0; drvTarget = 0; trnTarget = 0;
+    keyW = keyS = keyA = keyD = false;
     Serial.println(F("fall"));
     return;
   }
@@ -195,6 +199,7 @@ void loop() {
     Serial.print(F(" r=")); Serial.print(rate, 1);
     Serial.print(F(" pid=")); Serial.print(GyYsumPID, 2);
     Serial.print(F(" zr=")); Serial.print(balancing_zerro, 3);
+    Serial.print(F(" d=")); Serial.print(drvNow, 2);
     Serial.print(F(" s=")); Serial.print(speedFilt, 1);
     Serial.print(F(" i=")); Serial.print((long)speedInt);
     Serial.print(F(" kd=")); Serial.print(kd, 4);
