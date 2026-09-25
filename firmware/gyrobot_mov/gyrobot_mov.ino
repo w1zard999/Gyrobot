@@ -71,6 +71,7 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "brt") && v >= 0 && v <= 30) { brt = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "ksp") && v >= 0) { ksp = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdy") && v > -5 && v < 5) { kdyaw = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "kdif") && v >= 0 && v <= 0.1) { kdif = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdi") && v > -5 && v < 5) { kdyi = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "ksi") && v >= 0) { ksi = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "esa") && fabs(v) == 1) { esA = v; Serial.println(F("ok"));

@@ -28,8 +28,8 @@ void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 ст
   pwmOut = pwm;
   float yawEff = (trnTarget != 0) ? 0.0f : yawTerm;   // рулит водитель — курс молчит
   int c = (int)constrain(yawEff + trnNow, -60.0f, 60.0f);
-  int vA = pwm + c;                    // по-колёсный знаковый привод: разворот
-  int vB = pwm - c;                    // на месте работает, ничто не клампится в 0
+  int vA = pwm + c - (int)difTerm;     // нормализация: отстающее колесо подгоняем
+  int vB = pwm - c + (int)difTerm;
   setMotor(AIN1, AIN2, PWMA, vA, atr);
   setMotor(BIN1, BIN2, PWMB, vB, brt);
 }

@@ -44,6 +44,8 @@ extern float drvNow, trnNow;                 // сглаженные значе�
 // Энкодерный контур (тоже живые: ksp/ksi — вклад, esa/esb — знаки каналов)
 extern float esA, esB, ksp, ksi;
 extern float kdyaw, kdyi;                    // курс: демпфер вращения + удержание
+extern float kdif;                           // нормализация колёс (сериал)
+extern float difTerm;                        // текущая поправка нормализации
 void paramsPoll();
 // speed.h
 extern volatile long encA, encB;

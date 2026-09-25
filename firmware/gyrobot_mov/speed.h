@@ -13,7 +13,9 @@ float ksp = 0.3f;                // демпфер качения (лучший 
 float ksi = 0.005f;              // возврат на место: против медленного уезжания
 float kdyaw = 0.1f;              // демпфер вращения (разность колёс)
 float kdyi = 0.004f;             // удержание курса: ШИМ на имп «поворота»
+float kdif = 0.01f;              // нормализация колёс: ШИМ на имп рассинхрона
 float yawFilt = 0, yawInt = 0, yawTerm = 0;
+float difInt = 0, difTerm = 0;
 uint32_t lastSpeedMs = 0;
 
 void isrA() { encA += (PINC & _BV(PC2)) ? 1 : -1; }
@@ -38,14 +40,22 @@ void speedTick() {
   interrupts();
   long fwdA = (long)(esA * a), fwdB = (long)(esB * b);
   long imp = fwdA + fwdB;                        // сумма = качение
-  long yaw = fwdA - fwdB;                        // разность = вращение
+  long dif = fwdA - fwdB;                        // разность = рассинхрон колёс
+  long yaw = fwdA - fwdB;                        // разность = уход курса
   speedFilt = 0.9f * speedFilt + 0.1f * imp;
   yawFilt   = 0.9f * yawFilt   + 0.1f * yaw;
-  // утечка: позиция-память растекается (~5 с), иначе после толчка робот
-  // долго пятится к исходной точке вместо удержания нынешней позиции
-  speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
+  // якорь позиции: пока водитель жмёт W/S, возврат-на-место ждёт (иначе ksi
+  // набирал путь и тормозил поездку); отпустил — держим место остановки
+  if (fabs(drvNow) > 0.5f) speedInt = 0;
+  else speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
   yawInt   = constrain(yawInt + yaw, -2000.0f, 2000.0f);
   speedTerm = ksp * speedFilt + ksi * speedInt;
   yawTerm   = kdyaw * yawFilt + kdyi * yawInt;
-  if (trnTarget != 0) yawInt *= 0.9f;   // водитель рулит — курс-холд молчит
+  if (trnTarget != 0) yawInt *= 0.9f;
+  // нормализация колёс: рассинхрон копится только при езде ПРЯМО — в повороте
+  // колёсам положено крутиться по-разному
+  if (trnTarget == 0 && fabs(drvNow) > 0.5f)
+    difInt = constrain(difInt + dif, -800.0f, 800.0f);
+  difInt *= 0.998f;                              // забыто за ~20 с
+  difTerm = kdif * difInt;
 }
