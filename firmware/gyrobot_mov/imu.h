@@ -4,7 +4,7 @@
 #include "config.h"
 
 int16_t AcX, AcY, AcZ, GyX, GyY, GyZ;
-float gyroBiasX = 0, gyroBiasZ = 0;      // Z нужен контуру поворота
+float gyroBiasX = 0;
 
 void mpuWrite8(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(MPU_ADDR);
@@ -39,14 +39,13 @@ bool mpuRead() {                         // false = сбой I2C, цикл пр�
 }
 
 void gyroCalib(uint16_t ms) {            // робот должен стоять неподвижно
-  long sum = 0, sumZ = 0; int n = 0;
+  long sum = 0; int n = 0;
   uint32_t t0 = millis();
   while (millis() - t0 < ms) {
-    if (mpuRead()) { sum += GyX; sumZ += GyZ; n++; }
+    if (mpuRead()) { sum += GyX; n++; }
     delay(2);
   }
   gyroBiasX = n ? (float)sum / n : 0;
-  gyroBiasZ = n ? (float)sumZ / n : 0;
 }
 
 float accAngle() {                       // + = наклон вперёд (как 'a' в v3)

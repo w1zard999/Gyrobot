@@ -27,17 +27,15 @@ bool  armed = false;
 uint32_t timer = 0, uprightSince = 0, iterCnt = 0, hzCnt = 0, hzMark = 0;
 uint16_t loopHz = 0;
 
+// ---------- WASD (порт c_movement из listing_PID_2I_mov) ----------
+uint8_t flagMove = 0;           // 1=вперёд 2=назад 3=влево 4=вправо (их flag_move)
+uint32_t timeMove = 0;          // до какого времени действует команда (их time_move)
+float mfwd = 200.0f, mtrn = 110.0f;   // их _speed(200,200) и _speed(110,110)
+uint32_t mper = 200;            // клиент шлёт буквы 10 Гц — таймер продлевается
+
 // ---------- Живая настройка по сериалу (без перепрошивки) ----------
 float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
-
-// ---------- WASD (BT/USB) ----------
-float drv = -17.0f, trn = 60.0f;    // наклон (минус = вперёд) и поворот
-float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
-float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
-float turnOut = 0, ktrns = -1.0f;   // выход гиро-контура поворота и его знак
-bool keyW = false, keyS = false, keyA = false, keyD = false;
-uint32_t cmdDeadline = 0;
 
 void applyParam(const char* line) {
   char name[8]; uint8_t i = 0;
@@ -53,8 +51,7 @@ void applyParam(const char* line) {
     Serial.print(F(" imax=")); Serial.print(imax, 2);
     Serial.print(F(" pmin=")); Serial.print(pmin, 0);
     Serial.print(F(" atr=")); Serial.print(atr, 0);
-    Serial.print(F(" atr=")); Serial.print(atr, 0);
-    Serial.print(F(" brt=")); Serial.print(brt, 0);
+    Serial.print(F(" atrb=")); Serial.print(atrb, 0);
     Serial.print(F(" ksp=")); Serial.print(ksp, 3);
     Serial.print(F(" ksi=")); Serial.print(ksi, 4);
     Serial.print(F(" kdy=")); Serial.print(kdyaw, 3);
@@ -68,27 +65,20 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "dead") && v >= 0) { pid_dead = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "imax") && v > 0) { imax = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "pmin") && v > 0 && v <= 100) { pmin = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "atr") && v >= 0 && v <= 30) { atr = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "brt") && v >= 0 && v <= 30) { brt = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "atr") && v >= -20 && v <= 20) { atr = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "atrb") && v >= -20 && v <= 20) { atrb = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "ksp") && v >= 0) { ksp = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdy") && v > -5 && v < 5) { kdyaw = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "kdif") && v >= 0 && v <= 0.1) { kdif = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdi") && v > -5 && v < 5) { kdyi = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "ksi") && v >= 0) { ksi = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "esa") && fabs(v) == 1) { esA = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "esb") && fabs(v) == 1) { esB = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "drv") && v >= -10 && v <= 10) { drv = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "trn") && v >= -100 && v <= 100) { trn = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "ktrns") && fabs(v) == 1) { ktrns = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "zr") && v >= -3 && v <= 3) { balancing_zerro = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "mfwd") && v >= 50 && v <= 255) { mfwd = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "mtrn") && v >= 20 && v <= 255) { mtrn = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "mper") && v >= 60 && v <= 1000) { mper = v; Serial.println(F("ok"));
   } else if (name[1] == 0 && strchr("wsad", name[0])) {
-    if (name[0] == 'w') keyW = true;
-    if (name[0] == 's') keyS = true;
-    if (name[0] == 'a') keyA = true;
-    if (name[0] == 'd') keyD = true;
-    cmdDeadline = millis() + 300;
-    drvTarget = (keyW ? drv : 0) - (keyS ? drv : 0);
-    trnTarget = (keyD ? trn : 0) - (keyA ? trn : 0);
+    flagMove = (name[0] == 'w') ? 1 : (name[0] == 's') ? 2 : (name[0] == 'a') ? 3 : 4;
+    timeMove = millis() + mper;          // повтор буквы продлевает команду
     Serial.println(F("ok"));
   }
 }
@@ -127,10 +117,6 @@ void loop() {
   iterCnt++; hzCnt++;
   if (millis() - hzMark >= 1000) { hzMark = millis(); loopHz = hzCnt; hzCnt = 0; }
   paramsPoll();                          // живая настройка: "kd 0.005", "p"
-  if (millis() > cmdDeadline && (keyW || keyS || keyA || keyD)) {   // поток букв кончился — стоим
-    keyW = keyS = keyA = keyD = false;
-    drvTarget = 0; trnTarget = 0;
-  }
   speedTick();                           // окно 40 мс: скорость/путь (и в idle)
 
   // --- после падения: моторы стоят, ждём секунду стойки вертикально ---
@@ -155,8 +141,19 @@ void loop() {
     return;
   }
 
-  // 1. Двигаемся по выходу ПРОШЛОЙ итерации (порядок оригинала)
-  if (GyYsumPID > pid_dead) {
+  // 1. Движение WASD (порт c_movement) и баланс, приоритеты как в оригинале:
+  //    перекос |pid|>0.7 — баланс главнее движения; ровно стоит — моторы
+  //    держат команду движения (w/s 200-е рывки, a/d 110-е с противоходом)
+  if (flagMove && millis() >= timeMove) flagMove = 0;   // буквы кончились — стоим
+  if (fabs(GyYsumPID) > 0.7f) {
+    if (GyYsumPID > 0) drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
+    else drive(-pwmFromPid(-GyYsumPID) * DRIVE_SIGN);
+  } else if (flagMove) {
+    if (flagMove == 1)      moveRaw(+mfwd, +mfwd);   // вперёд (их _speed(200,200)+forward)
+    else if (flagMove == 2) moveRaw(-mfwd, -mfwd);   // назад
+    else if (flagMove == 3) moveRaw(-mtrn, +mtrn);   // влево на месте (их left)
+    else                    moveRaw(+mtrn, -mtrn);   // вправо на месте (их right)
+  } else if (fabs(GyYsumPID) > pid_dead) {
     drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
   } else if (GyYsumPID < -pid_dead) {
     drive(-pwmFromPid(-GyYsumPID) * DRIVE_SIGN);
@@ -169,25 +166,13 @@ void loop() {
   uint32_t t2 = timer; timer = micros();
   dt = (timer - t2) * 0.000001f;
   if (dt > 0.02f) dt = 0.02f;            // защита от застрявшего dt
-  drvNow += (drvTarget - drvNow) * (dt / 0.3f);   // TAU 0.3 c: ступенька = качели
-  trnNow += (trnTarget - trnNow) * (dt / 0.45f);  // поворот мягче: TAU 0.45
-  // гиро-контур поворота: trn задаёт целевую скорость разворота (60 -> 90 °/с),
-  // интегратор выдаёт дифференциал, который её держит. ktrns — знак (инверсия)
-  float yawRateNow = (GyZ - gyroBiasZ) / GYR_LSB;
-  if (trnTarget != 0) {
-    float targetYaw = ktrns * trnNow * 1.5f;
-    turnOut = constrain(turnOut + (targetYaw - yawRateNow) * dt * 1.5f, -70.0f, 70.0f);
-  } else {
-    turnOut = 0;
-  }
   rate = (GyX - gyroBiasX) / GYR_LSB;    // + = кренится вперёд
-  GyYsum += rate * dt + (accAngle() + balancing_zerro + drvNow - GyYsum) * (dt / TAU_ACC);
+  GyYsum += rate * dt + (accAngle() + balancing_zerro - GyYsum) * (dt / TAU_ACC);
 
   // 3. Падение
   if (fabs(GyYsum) > FALL_DEG) {
     armed = false; uprightSince = 0;
-    drvNow = 0; trnNow = 0; drvTarget = 0; trnTarget = 0;
-    keyW = keyS = keyA = keyD = false;
+    flagMove = 0;
     Serial.println(F("fall"));
     return;
   }
@@ -197,10 +182,13 @@ void loop() {
   SumIntegral = constrain(SumIntegral + GyYsum * dt, -imax, imax);
   GyYsumPID = kp * GyYsum + kd * rate + ki_s * SumIntegral + speedTerm;
 
-  // 5. АДАПТИВНЫЙ НОЛЬ — гейт |pid|>0.7 + защита (|угол|<10, |rate|<60), кламп ±6
+  // 5. АДАПТИВНЫЙ НОЛЬ — как в оригинале: |pid|>0.7. Но с защитой: только
+  //    возле вертикали (|угол|<10, |rate|<60) — иначе падение само отравляет
+  //    ноль, и после взвода робот встаёт с наклоном и пятится (v5 знал это:
+  //    «ноль портится во время падения»)
   if ((GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
     balancing_zerro += GyYsumPID * ZR_RATE * dt;
-    balancing_zerro = constrain(balancing_zerro, -6.0f, 6.0f);
+    balancing_zerro = constrain(balancing_zerro, -15.0f, 15.0f);  // страховка
     GyYsum += GyYsumPID * FF_RATE * dt;  // их feedforward, снимает накопленное
   }
 
@@ -210,8 +198,6 @@ void loop() {
     Serial.print(F(" r=")); Serial.print(rate, 1);
     Serial.print(F(" pid=")); Serial.print(GyYsumPID, 2);
     Serial.print(F(" zr=")); Serial.print(balancing_zerro, 3);
-    Serial.print(F(" d=")); Serial.print(drvNow, 2);
-    Serial.print(F(" t=")); Serial.print(trnNow, 1);
     Serial.print(F(" s=")); Serial.print(speedFilt, 1);
     Serial.print(F(" i=")); Serial.print((long)speedInt);
     Serial.print(F(" kd=")); Serial.print(kd, 4);

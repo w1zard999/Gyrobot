@@ -36,17 +36,11 @@
 // Живые значения (крутятся по сериалу без перепрошивки: "kd 0.005", "p" — показать)
 extern float kp, kd, ki_s, pid_dead, imax;   // живые (сериал)
 extern float pmin;                           // стартовый ШИМ моторов (сериал)
-extern float atr;                            // мёртвая зона мотора A: прибавка (сериал)
-extern float brt;                            // мёртвая зона мотора B: прибавка (сериал)
-extern float drv, trn;                       // WASD: наклон и поворот (сериал)
-extern float trnTarget;                      // угасание yawInt в speed.h
-extern float drvNow, trnNow;                 // сглаженные значения (motors.h, телеметрия)
-extern float turnOut;                        // выход гиро-контура поворота
+extern float atr;                            // выравнивание момента мотора A (сериал)
+extern float atrb;                           // то же при движении назад (сериал)
 // Энкодерный контур (тоже живые: ksp/ksi — вклад, esa/esb — знаки каналов)
 extern float esA, esB, ksp, ksi;
 extern float kdyaw, kdyi;                    // курс: демпфер вращения + удержание
-extern float kdif;                           // нормализация колёс (сериал)
-extern float difTerm;                        // текущая поправка нормализации
 void paramsPoll();
 // speed.h
 extern volatile long encA, encB;

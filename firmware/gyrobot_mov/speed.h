@@ -13,10 +13,7 @@ float ksp = 0.3f;                // демпфер качения (лучший 
 float ksi = 0.005f;              // возврат на место: против медленного уезжания
 float kdyaw = 0.1f;              // демпфер вращения (разность колёс)
 float kdyi = 0.004f;             // удержание курса: ШИМ на имп «поворота»
-float kdif = 0.01f;              // нормализация колёс: ШИМ на имп рассинхрона
 float yawFilt = 0, yawInt = 0, yawTerm = 0;
-float difInt = 0, difTerm = 0;
-bool drivingPrev = false;
 uint32_t lastSpeedMs = 0;
 
 void isrA() { encA += (PINC & _BV(PC2)) ? 1 : -1; }
@@ -41,26 +38,13 @@ void speedTick() {
   interrupts();
   long fwdA = (long)(esA * a), fwdB = (long)(esB * b);
   long imp = fwdA + fwdB;                        // сумма = качение
-  long dif = fwdA - fwdB;                        // разность = рассинхрон колёс
-  long yaw = fwdA - fwdB;                        // разность = уход курса
+  long yaw = fwdA - fwdB;                        // разность = вращение
   speedFilt = 0.9f * speedFilt + 0.1f * imp;
   yawFilt   = 0.9f * yawFilt   + 0.1f * yaw;
-  // во время езды: якорь позиции и память скорости гасим (ksi не тормозит
-  // поездку, а в момент отпускания стартуем с нуля — пятиться нечему)
-  if (fabs(drvNow) > 0.5f) { speedInt = 0; speedFilt = 0; }
-  else {
-    if (!drivingPrev) { speedFilt = 0; speedInt = 0; }   // момент отпускания
-    speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
-  }
-  drivingPrev = fabs(drvNow) > 0.5f;
+  // утечка: позиция-память растекается (~5 с), иначе после толчка робот
+  // долго пятится к исходной точке вместо удержания нынешней позиции
+  speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
   yawInt   = constrain(yawInt + yaw, -2000.0f, 2000.0f);
   speedTerm = ksp * speedFilt + ksi * speedInt;
   yawTerm   = kdyaw * yawFilt + kdyi * yawInt;
-  if (trnTarget != 0) yawInt *= 0.9f;
-  // нормализация колёс: рассинхрон копится только при езде ПРЯМО — в повороте
-  // колёсам положено крутиться по-разному
-  if (trnTarget == 0 && fabs(drvNow) > 0.5f)
-    difInt = constrain(difInt + dif, -800.0f, 800.0f);
-  difInt *= 0.998f;                              // забыто за ~20 с
-  difTerm = kdif * difInt;
 }
