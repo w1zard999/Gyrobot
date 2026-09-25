@@ -20,12 +20,19 @@ held = set()
 lock = threading.Lock()
 
 
+VK = {87: 'w', 65: 'a', 83: 's', 68: 'd'}   # виртуальные коды: не зависят от раскладки
+
+
 def ch_of(key):
+    vk = getattr(key, 'vk', None)
+    if vk in VK:
+        return VK[vk]
     try:
         ch = key.char
     except AttributeError:
         return None
-    return ch.lower() if isinstance(ch, str) else None
+    ch = ch.lower() if isinstance(ch, str) else None
+    return ch if ch in VK.values() else None
 
 
 def on_press(key):
