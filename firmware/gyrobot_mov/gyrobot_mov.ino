@@ -32,7 +32,8 @@ float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
 
 // ---------- WASD (BT/USB) ----------
-float drv = 2.5f, trn = 35.0f;      // целевой наклон, °; дифференциал поворота, ШИМ
+float drv = -4.5f, trn = 35.0f;     // наклон (знак: минус = вперёд, полевой тест
+                                    // 2026-09-21) и дифференциал поворота, ШИМ
 float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
 float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
 bool keyW = false, keyS = false, keyA = false, keyD = false;

@@ -16,17 +16,20 @@ void motorsInit() {
   TCCR1B = (TCCR1B & 0xF8) | 0x02;     // D9/D10: ШИМ 3.9 кГц (Timer1, делитель 8)
 }
 
+static void setMotor(uint8_t p1, uint8_t p2, uint8_t pw, int v, float trim) {
+  bool fwd = v >= 0;
+  digitalWrite(p1, fwd); digitalWrite(p2, !fwd);
+  analogWrite(pw, constrain(abs(v) + (int)trim, 0, 255));
+}
+
 void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 стоп
   pwmOut = pwm;
-  bool fwd = pwm >= 0;
-  int p = constrain(abs(pwm), 0, 255);
-  digitalWrite(AIN1, fwd); digitalWrite(AIN2, !fwd);
-  digitalWrite(BIN1, fwd); digitalWrite(BIN2, !fwd);
-  // дифференциал: yawTerm (курс) + trnNow (водитель). Кап ±60. Без ворот p>0:
-  // при p=0 дифференциал = поворот на месте — штатно
-  int c = (int)constrain(yawTerm + trnNow, -60.0f, 60.0f);
-  analogWrite(PWMA, constrain(p + (int)(fwd ? atr : atrb) + c, 0, 255));
-  analogWrite(PWMB, constrain(p - c, 0, 255));
+  float yawEff = (trnTarget != 0) ? 0.0f : yawTerm;   // рулит водитель — курс молчит
+  int c = (int)constrain(yawEff + trnNow, -60.0f, 60.0f);
+  int vA = pwm + c;                    // по-колёсный знаковый привод: разворот
+  int vB = pwm - c;                    // на месте работает, ничто не клампится в 0
+  setMotor(AIN1, AIN2, PWMA, vA, atr);
+  setMotor(BIN1, BIN2, PWMB, vB, 0);
 }
 
 // Развёртка PID -> ШИМ. У оригинала map(pid*40, 28, 200, 100, 255) под его
