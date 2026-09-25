@@ -22,14 +22,15 @@ lock = threading.Lock()
 
 def ch_of(key):
     try:
-        return (key.char or '').lower()
+        ch = key.char
     except AttributeError:
         return None
+    return ch.lower() if isinstance(ch, str) else None
 
 
 def on_press(key):
     ch = ch_of(key)
-    if ch in 'wasd':
+    if ch and ch in 'wasd':
         with lock:
             held.add(ch)
     elif key == keyboard.Key.esc:
@@ -38,7 +39,7 @@ def on_press(key):
 
 def on_release(key):
     ch = ch_of(key)
-    if ch in 'wasd':
+    if ch and ch in 'wasd':
         with lock:
             held.discard(ch)
 
