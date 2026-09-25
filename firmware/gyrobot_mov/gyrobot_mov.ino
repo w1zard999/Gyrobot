@@ -184,16 +184,16 @@ void loop() {
   SumIntegral = constrain(SumIntegral + GyYsum * dt, -imax, imax);
   GyYsumPID = kp * GyYsum + kd * rate + ki_s * SumIntegral + speedTerm;
 
-  // 5. АДАПТИВНЫЙ НОЛЬ — как в оригинале: |pid|>0.7. Но с защитой: только
-  //    возле вертикали (|угол|<10, |rate|<60) — иначе падение само отравляет
-  //    ноль, и после взвода робот встаёт с наклоном и пятится (v5 знал это:
-  //    «ноль портится во время падения»)
-  if (trnTarget == 0 && (GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
+  // 5. АДАПТИВНЫЙ НОЛЬ — как в оригинале: |pid|>0.7, возле вертикали, без руления.
+  //    Гигиена: поездка/поворот не переписывают трим, кламп ±3 (реальный трим
+  //    0.4-2.7), утечка к нулю ~1 мин — яд рассасывается сам
+  if (fabs(drvNow) < 0.5f && trnTarget == 0 &&
+      (GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
     balancing_zerro += GyYsumPID * ZR_RATE * dt;
-    balancing_zerro = constrain(balancing_zerro, -6.0f, 6.0f);  // реальный трим 0.4-2.7;
-                                     // ±15 давал яд до ±15 при длительном перекосе
     GyYsum += GyYsumPID * FF_RATE * dt;  // их feedforward, снимает накопленное
   }
+  balancing_zerro *= (1.0f - dt / 60.0f);                       // утечка к нулю
+  balancing_zerro = constrain(balancing_zerro, -3.0f, 3.0f);
 
   // 6. Телеметрия ~7 Гц
   if ((iterCnt & 0x7F) == 0) {
