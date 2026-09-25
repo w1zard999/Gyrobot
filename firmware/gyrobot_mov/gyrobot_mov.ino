@@ -32,9 +32,10 @@ float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
 
 // ---------- WASD (BT/USB) ----------
-float drv = -15.0f, trn = 60.0f;     // наклон (минус = вперёд) и поворот
+float drv = -17.0f, trn = 60.0f;    // наклон (минус = вперёд) и поворот
 float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
 float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
+float turnOut = 0, ktrns = 1.0f;    // выход гиро-контура поворота и его знак
 bool keyW = false, keyS = false, keyA = false, keyD = false;
 uint32_t cmdDeadline = 0;
 
@@ -78,6 +79,7 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "esb") && fabs(v) == 1) { esB = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "drv") && v >= -10 && v <= 10) { drv = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "trn") && v >= -100 && v <= 100) { trn = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "ktrns") && fabs(v) == 1) { ktrns = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "zr") && v >= -3 && v <= 3) { balancing_zerro = v; Serial.println(F("ok"));
   } else if (name[1] == 0 && strchr("wsad", name[0])) {
     if (name[0] == 'w') keyW = true;
@@ -169,6 +171,15 @@ void loop() {
   if (dt > 0.02f) dt = 0.02f;            // защита от застрявшего dt
   drvNow += (drvTarget - drvNow) * (dt / 0.3f);   // TAU 0.3 c: ступенька = качели
   trnNow += (trnTarget - trnNow) * (dt / 0.45f);  // поворот мягче: TAU 0.45
+  // гиро-контур поворота: trn задаёт целевую скорость разворота (60 -> 90 °/с),
+  // интегратор выдаёт дифференциал, который её держит. ktrns — знак (инверсия)
+  float yawRateNow = (GyZ - gyroBiasZ) / GYR_LSB;
+  if (trnTarget != 0) {
+    float targetYaw = ktrns * trnNow * 1.5f;
+    turnOut = constrain(turnOut + (targetYaw - yawRateNow) * dt * 1.5f, -70.0f, 70.0f);
+  } else {
+    turnOut = 0;
+  }
   rate = (GyX - gyroBiasX) / GYR_LSB;    // + = кренится вперёд
   GyYsum += rate * dt + (accAngle() + balancing_zerro + drvNow - GyYsum) * (dt / TAU_ACC);
 

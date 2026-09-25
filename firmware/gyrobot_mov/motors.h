@@ -3,8 +3,8 @@
 #include "config.h"
 
 int pwmOut = 0;                        // последний ШИМ (телеметрия x=)
-float pmin = 16.0f;                    // стартовый ШИМ моторов: 16 трясёт корпус,
-                                       // крутится по сериалу "pmin 10"
+float pmin = 24.0f;                    // стартовый ШИМ моторов: 16 при езде давал
+                                       // «одно колесо» — оба мотора не выходили из зон
 float atr = 16.0f;                     // мёртвая зона мотора A (встает 16 vs 12 у B):
 float brt = 15.0f;                     // прибавка сверху команды, только при вращении
 
@@ -26,8 +26,8 @@ static void setMotor(uint8_t p1, uint8_t p2, uint8_t pw, int v, float trim) {
 
 void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 стоп
   pwmOut = pwm;
-  float yawEff = (trnTarget != 0) ? 0.0f : yawTerm;   // рулит водитель — курс молчит
-  int c = (int)constrain(yawEff + trnNow, -60.0f, 60.0f);
+  float turnCmd = (trnTarget != 0) ? turnOut : yawTerm;  // рулит либо водитель
+  int c = (int)constrain(turnCmd, -70.0f, 70.0f);        // (гиро), либо курс-холд
   int vA = pwm + c - (int)difTerm;     // нормализация: отстающее колесо подгоняем
   int vB = pwm - c + (int)difTerm;
   setMotor(AIN1, AIN2, PWMA, vA, atr);

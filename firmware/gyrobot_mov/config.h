@@ -41,6 +41,7 @@ extern float brt;                            // мёртвая зона мото
 extern float drv, trn;                       // WASD: наклон и поворот (сериал)
 extern float trnTarget;                      // угасание yawInt в speed.h
 extern float drvNow, trnNow;                 // сглаженные значения (motors.h, телеметрия)
+extern float turnOut;                        // выход гиро-контура поворота
 // Энкодерный контур (тоже живые: ksp/ksi — вклад, esa/esb — знаки каналов)
 extern float esA, esB, ksp, ksi;
 extern float kdyaw, kdyi;                    // курс: демпфер вращения + удержание

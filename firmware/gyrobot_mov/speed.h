@@ -16,6 +16,7 @@ float kdyi = 0.004f;             // удержание курса: ШИМ на �
 float kdif = 0.01f;              // нормализация колёс: ШИМ на имп рассинхрона
 float yawFilt = 0, yawInt = 0, yawTerm = 0;
 float difInt = 0, difTerm = 0;
+bool drivingPrev = false;
 uint32_t lastSpeedMs = 0;
 
 void isrA() { encA += (PINC & _BV(PC2)) ? 1 : -1; }
@@ -44,10 +45,14 @@ void speedTick() {
   long yaw = fwdA - fwdB;                        // разность = уход курса
   speedFilt = 0.9f * speedFilt + 0.1f * imp;
   yawFilt   = 0.9f * yawFilt   + 0.1f * yaw;
-  // якорь позиции: пока водитель жмёт W/S, возврат-на-место ждёт (иначе ksi
-  // набирал путь и тормозил поездку); отпустил — держим место остановки
-  if (fabs(drvNow) > 0.5f) speedInt = 0;
-  else speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
+  // во время езды: якорь позиции и память скорости гасим (ksi не тормозит
+  // поездку, а в момент отпускания стартуем с нуля — пятиться нечему)
+  if (fabs(drvNow) > 0.5f) { speedInt = 0; speedFilt = 0; }
+  else {
+    if (!drivingPrev) { speedFilt = 0; speedInt = 0; }   // момент отпускания
+    speedInt = constrain((speedInt + imp) * 0.995f, -2000.0f, 2000.0f);
+  }
+  drivingPrev = fabs(drvNow) > 0.5f;
   yawInt   = constrain(yawInt + yaw, -2000.0f, 2000.0f);
   speedTerm = ksp * speedFilt + ksi * speedInt;
   yawTerm   = kdyaw * yawFilt + kdyi * yawInt;
