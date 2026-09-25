@@ -6,7 +6,7 @@ int pwmOut = 0;                        // последний ШИМ (телем�
 float pmin = 16.0f;                    // стартовый ШИМ моторов: 16 трясёт корпус,
                                        // крутится по сериалу "pmin 10"
 float atr = 16.0f;                     // мёртвая зона мотора A (встает 16 vs 12 у B):
-float brt = 12.0f;                     // прибавка сверху команды, только при вращении
+float brt = 15.0f;                     // прибавка сверху команды, только при вращении
 
 void motorsInit() {
   pinMode(PWMA, OUTPUT); pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT);
