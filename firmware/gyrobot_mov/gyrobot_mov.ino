@@ -32,8 +32,8 @@ float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
 
 // ---------- WASD (BT/USB) ----------
-float drv = -4.5f, trn = 35.0f;     // наклон (знак: минус = вперёд, полевой тест
-                                    // 2026-09-21) и дифференциал поворота, ШИМ
+float drv = -7.0f, trn = 60.0f;     // наклон (минус = вперёд; 4.5 мало) и поворот
+                                    // (35 мало: мотор A под нагрузкой не трогался)
 float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
 float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
 bool keyW = false, keyS = false, keyA = false, keyD = false;
@@ -188,7 +188,7 @@ void loop() {
   //    возле вертикали (|угол|<10, |rate|<60) — иначе падение само отравляет
   //    ноль, и после взвода робот встаёт с наклоном и пятится (v5 знал это:
   //    «ноль портится во время падения»)
-  if ((GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
+  if (trnTarget == 0 && (GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
     balancing_zerro += GyYsumPID * ZR_RATE * dt;
     balancing_zerro = constrain(balancing_zerro, -6.0f, 6.0f);  // реальный трим 0.4-2.7;
                                      // ±15 давал яд до ±15 при длительном перекосе
@@ -202,6 +202,7 @@ void loop() {
     Serial.print(F(" pid=")); Serial.print(GyYsumPID, 2);
     Serial.print(F(" zr=")); Serial.print(balancing_zerro, 3);
     Serial.print(F(" d=")); Serial.print(drvNow, 2);
+    Serial.print(F(" t=")); Serial.print(trnNow, 1);
     Serial.print(F(" s=")); Serial.print(speedFilt, 1);
     Serial.print(F(" i=")); Serial.print((long)speedInt);
     Serial.print(F(" kd=")); Serial.print(kd, 4);
