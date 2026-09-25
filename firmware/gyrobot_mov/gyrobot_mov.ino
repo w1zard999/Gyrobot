@@ -189,7 +189,8 @@ void loop() {
   //    «ноль портится во время падения»)
   if ((GyYsumPID > 0.7f || GyYsumPID < -0.7f) && fabs(GyYsum) < 10.0f && fabs(rate) < 60) {
     balancing_zerro += GyYsumPID * ZR_RATE * dt;
-    balancing_zerro = constrain(balancing_zerro, -15.0f, 15.0f);  // страховка
+    balancing_zerro = constrain(balancing_zerro, -6.0f, 6.0f);  // реальный трим 0.4-2.7;
+                                     // ±15 давал яд до ±15 при длительном перекосе
     GyYsum += GyYsumPID * FF_RATE * dt;  // их feedforward, снимает накопленное
   }
 
