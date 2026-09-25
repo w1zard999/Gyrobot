@@ -52,7 +52,8 @@ void applyParam(const char* line) {
     Serial.print(F(" imax=")); Serial.print(imax, 2);
     Serial.print(F(" pmin=")); Serial.print(pmin, 0);
     Serial.print(F(" atr=")); Serial.print(atr, 0);
-    Serial.print(F(" atrb=")); Serial.print(atrb, 0);
+    Serial.print(F(" atr=")); Serial.print(atr, 0);
+    Serial.print(F(" brt=")); Serial.print(brt, 0);
     Serial.print(F(" ksp=")); Serial.print(ksp, 3);
     Serial.print(F(" ksi=")); Serial.print(ksi, 4);
     Serial.print(F(" kdy=")); Serial.print(kdyaw, 3);
@@ -66,8 +67,8 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "dead") && v >= 0) { pid_dead = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "imax") && v > 0) { imax = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "pmin") && v > 0 && v <= 100) { pmin = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "atr") && v >= -20 && v <= 20) { atr = v; Serial.println(F("ok"));
-  } else if (!strcmp(name, "atrb") && v >= -20 && v <= 20) { atrb = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "atr") && v >= 0 && v <= 30) { atr = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "brt") && v >= 0 && v <= 30) { brt = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "ksp") && v >= 0) { ksp = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdy") && v > -5 && v < 5) { kdyaw = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "kdi") && v > -5 && v < 5) { kdyi = v; Serial.println(F("ok"));
@@ -76,6 +77,7 @@ void applyParam(const char* line) {
   } else if (!strcmp(name, "esb") && fabs(v) == 1) { esB = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "drv") && v >= -10 && v <= 10) { drv = v; Serial.println(F("ok"));
   } else if (!strcmp(name, "trn") && v >= -100 && v <= 100) { trn = v; Serial.println(F("ok"));
+  } else if (!strcmp(name, "zr") && v >= -3 && v <= 3) { balancing_zerro = v; Serial.println(F("ok"));
   } else if (name[1] == 0 && strchr("wsad", name[0])) {
     if (name[0] == 'w') keyW = true;
     if (name[0] == 's') keyS = true;

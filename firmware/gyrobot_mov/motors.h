@@ -2,11 +2,11 @@
 #pragma once
 #include "config.h"
 
-int pwmOut = 0;                          // последний ШИМ (телеметрия x=)
-float pmin = 16.0f;                      // стартовый ШИМ моторов: 16 трясёт корпус,
-                                         // крутится по сериалу "pmin 10"
-float atr = 0.0f;                        // статические добавки выключены: курсом
-float atrb = 0.0f;                       // теперь владеет контур kdy/kdi
+int pwmOut = 0;                        // последний ШИМ (телеметрия x=)
+float pmin = 16.0f;                    // стартовый ШИМ моторов: 16 трясёт корпус,
+                                       // крутится по сериалу "pmin 10"
+float atr = 16.0f;                     // мёртвая зона мотора A (встает 16 vs 12 у B):
+float brt = 12.0f;                     // прибавка сверху команды, только при вращении
 
 void motorsInit() {
   pinMode(PWMA, OUTPUT); pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT);
@@ -19,7 +19,9 @@ void motorsInit() {
 static void setMotor(uint8_t p1, uint8_t p2, uint8_t pw, int v, float trim) {
   bool fwd = v >= 0;
   digitalWrite(p1, fwd); digitalWrite(p2, !fwd);
-  analogWrite(pw, constrain(abs(v) + (int)trim, 0, 255));
+  int p = abs(v);
+  if (p > 0) p += (int)trim;           // компенсация мёртвой зоны: только при вращении
+  analogWrite(pw, constrain(p, 0, 255));
 }
 
 void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 стоп
@@ -29,7 +31,7 @@ void drive(int pwm) {                  // >0 вперёд, <0 назад, 0 ст
   int vA = pwm + c;                    // по-колёсный знаковый привод: разворот
   int vB = pwm - c;                    // на месте работает, ничто не клампится в 0
   setMotor(AIN1, AIN2, PWMA, vA, atr);
-  setMotor(BIN1, BIN2, PWMB, vB, 0);
+  setMotor(BIN1, BIN2, PWMB, vB, brt);
 }
 
 // Развёртка PID -> ШИМ. У оригинала map(pid*40, 28, 200, 100, 255) под его

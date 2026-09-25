@@ -36,8 +36,8 @@
 // Живые значения (крутятся по сериалу без перепрошивки: "kd 0.005", "p" — показать)
 extern float kp, kd, ki_s, pid_dead, imax;   // живые (сериал)
 extern float pmin;                           // стартовый ШИМ моторов (сериал)
-extern float atr;                            // выравнивание момента мотора A (сериал)
-extern float atrb;                           // то же при движении назад (сериал)
+extern float atr;                            // мёртвая зона мотора A: прибавка (сериал)
+extern float brt;                            // мёртвая зона мотора B: прибавка (сериал)
 extern float drv, trn;                       // WASD: наклон и поворот (сериал)
 extern float trnTarget;                      // угасание yawInt в speed.h
 extern float drvNow, trnNow;                 // сглаженные значения (motors.h, телеметрия)
