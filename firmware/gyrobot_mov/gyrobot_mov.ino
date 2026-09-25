@@ -18,7 +18,7 @@
 #include "speed.h"
 
 // ---------- Состояние ----------
-float balancing_zerro = 0.4;  // точка равновесия (подбор 2026-09-21, было 1.4)
+float balancing_zerro = 1.6;  // трим под пол/заряд (подобран 2026-09-21: 0.4 полз вперёд)
 float GyYsum = 0;             // фильтрованный угол
 float GyYsumPID = 0;          // выход PID прошлой итерации
 float SumIntegral = 0;
