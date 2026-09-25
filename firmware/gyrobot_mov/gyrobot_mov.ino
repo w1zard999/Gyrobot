@@ -35,7 +35,7 @@ float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 
 float drv = -17.0f, trn = 60.0f;    // наклон (минус = вперёд) и поворот
 float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
 float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
-float turnOut = 0, ktrns = 1.0f;    // выход гиро-контура поворота и его знак
+float turnOut = 0, ktrns = -1.0f;   // выход гиро-контура поворота и его знак
 bool keyW = false, keyS = false, keyA = false, keyD = false;
 uint32_t cmdDeadline = 0;
 
