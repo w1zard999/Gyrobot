@@ -32,8 +32,7 @@ float kp = KP_DEF, kd = KD_DEF, ki_s = KI_DEF, pid_dead = DEAD_DEF;
 float imax = 1.0f;   // потолок интеграла (подбор: 1.0 -> 0.3 -> 0.9 -> вернули 1.0)
 
 // ---------- WASD (BT/USB) ----------
-float drv = -7.0f, trn = 60.0f;     // наклон (минус = вперёд; 4.5 мало) и поворот
-                                    // (35 мало: мотор A под нагрузкой не трогался)
+float drv = -9.0f, trn = 45.0f;     // наклон (минус = вперёд) и поворот
 float drvTarget = 0, drvNow = 0;    // сглаженный наклон добавляется к нолю равновесия
 float trnTarget = 0, trnNow = 0;    // дифференциал: A +, B −
 bool keyW = false, keyS = false, keyA = false, keyD = false;
@@ -166,7 +165,7 @@ void loop() {
   dt = (timer - t2) * 0.000001f;
   if (dt > 0.02f) dt = 0.02f;            // защита от застрявшего dt
   drvNow += (drvTarget - drvNow) * (dt / 0.3f);   // TAU 0.3 c: ступенька = качели
-  trnNow += (trnTarget - trnNow) * (dt / 0.3f);
+  trnNow += (trnTarget - trnNow) * (dt / 0.45f);  // поворот мягче: TAU 0.45
   rate = (GyX - gyroBiasX) / GYR_LSB;    // + = кренится вперёд
   GyYsum += rate * dt + (accAngle() + balancing_zerro + drvNow - GyYsum) * (dt / TAU_ACC);
 
