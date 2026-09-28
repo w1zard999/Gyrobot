@@ -5,3 +5,6 @@ backup/
 *.o
 *.bin
 build/
+
+# логи телеметрии wasd.py
+tools/logs/
