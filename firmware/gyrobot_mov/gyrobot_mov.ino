@@ -149,14 +149,16 @@ void loop() {
     if (GyYsumPID > 0) drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
     else drive(-pwmFromPid(-GyYsumPID) * DRIVE_SIGN);
   } else if (flagMove) {
-    // плавная передача хода: чем сильнее наклон, тем слабее движение и
-    // сильнее баланс — вместо рубильника +50/-коррекция
+    // плавная передача хода + фазовый гейт как в оригинале: рывок даётся
+    // только в «своей» фазе качки (вперёд — когда корпус наклоняется вперёд,
+    // rate >= 0), в чужой фазе моторы держат последнее значение
     float fade = 1.0f - fabs(GyYsumPID) / 0.7f;
     int pwm = (int)(mfwd * fade);
-    if (flagMove == 1)      moveRaw(+pwm, +pwm);   // вперёд (их _speed(200,200)+forward)
-    else if (flagMove == 2) moveRaw(-pwm, -pwm);   // назад
+    bool phaseFwd = (rate >= 0);
+    if (flagMove == 1 && phaseFwd)      moveRaw(+pwm, +pwm);   // вперёд в фазе наклона вперёд
+    else if (flagMove == 2 && !phaseFwd) moveRaw(-pwm, -pwm);  // назад в фазе наклона назад
     else if (flagMove == 3) moveRaw(-(int)(mtrn * fade), +(int)(mtrn * fade));   // влево
-    else                    moveRaw(+(int)(mtrn * fade), -(int)(mtrn * fade));   // вправо
+    else if (flagMove == 4) moveRaw(+(int)(mtrn * fade), -(int)(mtrn * fade));   // вправо
   } else if (fabs(GyYsumPID) > pid_dead) {
     drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
   } else if (GyYsumPID < -pid_dead) {
