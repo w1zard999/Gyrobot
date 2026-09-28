@@ -149,10 +149,14 @@ void loop() {
     if (GyYsumPID > 0) drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
     else drive(-pwmFromPid(-GyYsumPID) * DRIVE_SIGN);
   } else if (flagMove) {
-    if (flagMove == 1)      moveRaw(+mfwd, +mfwd);   // вперёд (их _speed(200,200)+forward)
-    else if (flagMove == 2) moveRaw(-mfwd, -mfwd);   // назад
-    else if (flagMove == 3) moveRaw(-mtrn, +mtrn);   // влево на месте (их left)
-    else                    moveRaw(+mtrn, -mtrn);   // вправо на месте (их right)
+    // плавная передача хода: чем сильнее наклон, тем слабее движение и
+    // сильнее баланс — вместо рубильника +50/-коррекция
+    float fade = 1.0f - fabs(GyYsumPID) / 0.7f;
+    int pwm = (int)(mfwd * fade);
+    if (flagMove == 1)      moveRaw(+pwm, +pwm);   // вперёд (их _speed(200,200)+forward)
+    else if (flagMove == 2) moveRaw(-pwm, -pwm);   // назад
+    else if (flagMove == 3) moveRaw(-(int)(mtrn * fade), +(int)(mtrn * fade));   // влево
+    else                    moveRaw(+(int)(mtrn * fade), -(int)(mtrn * fade));   // вправо
   } else if (fabs(GyYsumPID) > pid_dead) {
     drive(pwmFromPid(GyYsumPID) * DRIVE_SIGN);
   } else if (GyYsumPID < -pid_dead) {

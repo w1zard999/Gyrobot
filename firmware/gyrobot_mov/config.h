@@ -28,7 +28,7 @@
 #define DEAD_DEF 0.4f     // |выход| меньше — моторы выключены
 #define FALL_DEG 30.0f
 #define TAU_ACC 2.0f      // тяга фильтра к акселю, с
-#define ZR_RATE 4.0f      // скорость адаптивного нуля, 1/с
+#define ZR_RATE 1.0f      // скорость адаптивного нуля: 4.0 срывало ноль при взводе
 #define FF_RATE 8.0f      // feedforward нуля, 1/с
 #define PWM_MIN 16        // мёртвая зона на 3.9 кГц: 16/12 (STATUS.md)
 
