@@ -8,3 +8,4 @@ build/
 
 # логи телеметрии wasd.py
 tools/logs/
+__pycache__/

@@ -6,7 +6,7 @@ import time
 import serial
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--port', default='COM9')
+ap.add_argument('--port', default='COM13', help='COM13 — Bluetooth (без ресета платы), COM10 — USB (ресетит)')
 ap.add_argument('--boot', type=float, default=1.8, help='пауза после открытия (бут платы)')
 ap.add_argument('--listen', type=float, default=3.0, help='сколько слушать после команд')
 ap.add_argument('--cmds', default='', help='команды через ;')
