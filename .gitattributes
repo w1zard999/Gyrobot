@@ -1,0 +1,4 @@
+# скрипты запуска: Unix-строки для mac/linux, CRLF для Windows
+*.sh      text eol=lf
+*.command text eol=lf
+*.bat     text eol=crlf

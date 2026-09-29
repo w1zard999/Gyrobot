@@ -9,3 +9,4 @@ build/
 # логи телеметрии wasd.py
 tools/logs/
 __pycache__/
+tools/.wasd_port
