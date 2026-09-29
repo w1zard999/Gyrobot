@@ -59,9 +59,14 @@ PI по скорости и положению колёс (энкодеры), п
 ## Установка на ПК (один раз)
 
 Для езды нужен только **Python 3** (на Windows — с python.org, галочка «Add to
-PATH»). Пакеты `pygame` и `pyserial` клиент при первом запуске поставит сам;
-если система не даёт ставить пакеты глобально (Linux, Homebrew на маке), он
-создаст своё окружение `tools/.venv` и дальше будет запускаться из него.
+PATH»). Пакеты `pygame` и `pyserial`:
+
+- **Windows, macOS** — клиент при первом запуске поставит сам; если система не
+  даёт ставить пакеты глобально (Homebrew-Python), создаст своё окружение
+  `tools/.venv` и дальше будет запускаться из него.
+- **Linux** — клиент ничего не ставит: покажет команду для твоего дистрибутива
+  (например, `sudo apt install python3-pygame python3-serial`) и будет ждать,
+  пока пакеты не появятся.
 
 Дальше спарить HC-05 (PIN обычно `1234` или `0000`):
 
@@ -147,7 +152,7 @@ python tools/talk.py --cmds "kd 0.45;p"    # поменять и показат�
 wasd.bat / .sh / .command  — клиент WASD для Windows / Linux / macOS
 flash.bat                  — прошивка (Windows)
 firmware/gyrobot_tumbller/ — прошивка робота
-tools/wasd.py              — клиент WASD: окно pygame, автопоиск порта, сам ставит пакеты, лог в tools/logs/
+tools/wasd.py              — клиент WASD: окно pygame, автопоиск порта, ставит пакеты (Linux — просит), лог в tools/logs/
 tools/talk.py              — команды и чтение телеметрии
 tools/turnstat.py,
 tools/stopstat.py          — разбор логов поворотов и остановок

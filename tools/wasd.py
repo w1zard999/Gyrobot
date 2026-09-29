@@ -38,10 +38,61 @@ def rerun_in(python):
     sys.exit(subprocess.call([python, os.path.abspath(__file__)] + sys.argv[1:]))
 
 
+def missing_deps():
+    import importlib
+    importlib.invalidate_caches()
+    out = []
+    for mod, pkg in (('pygame', 'pygame'), ('serial', 'pyserial')):
+        try:
+            __import__(mod)
+        except ImportError:
+            out.append(pkg)
+    return out
+
+
+def linux_install_hint(missing):
+    """Команда установки для дистрибутива (по /etc/os-release)."""
+    ids = ''
+    try:
+        for line in open('/etc/os-release', encoding='utf-8'):
+            if line.startswith(('ID=', 'ID_LIKE=')):
+                ids += ' ' + line.split('=', 1)[1].strip().strip('"').lower()
+    except OSError:
+        pass
+    names = {'pygame': 'pygame', 'pyserial': 'serial'}
+    if any(d in ids for d in ('debian', 'ubuntu')):
+        return 'sudo apt install ' + ' '.join(f'python3-{names[p]}' for p in missing)
+    if any(d in ids for d in ('fedora', 'rhel', 'centos')):
+        return 'sudo dnf install ' + ' '.join(f'python3-{p}' for p in missing)
+    if any(d in ids for d in ('arch', 'manjaro')):
+        return 'sudo pacman -S ' + ' '.join(f'python-{p}' for p in missing)
+    return 'через пакетный менеджер дистрибутива (пакеты python3-pygame, python3-serial)'
+
+
+def wait_for_deps_linux():
+    """Linux: сами ничего не ставим — сообщаем и ждём, пока пользователь поставит."""
+    while True:
+        missing = missing_deps()
+        if not missing:
+            return
+        print(f'\nНе установлены пакеты Python: {", ".join(missing)}')
+        print(f'  Установи:  {linux_install_hint(missing)}')
+        print(f'  или:       {sys.executable} -m pip install --user {" ".join(missing)}')
+        try:
+            input('После установки нажми Enter для проверки (Ctrl+C — выход)... ')
+        except (KeyboardInterrupt, EOFError):
+            print()
+            sys.exit(1)
+
+
 def ensure_deps():
     """Нет pygame/pyserial — поставить. Сначала обычным pip; если система не
-    даёт (Linux/Homebrew, PEP 668) — в своё окружение tools/.venv."""
+    даёт (Homebrew на маке, PEP 668) — в своё окружение tools/.venv.
+    На Linux ничего не ставим, только просим установить (wait_for_deps_linux)."""
     if have_deps():
+        return
+    if sys.platform.startswith('linux'):
+        wait_for_deps_linux()
         return
     in_venv = os.path.abspath(sys.executable) == os.path.abspath(VENV_PY)
     if not in_venv and os.path.exists(VENV_PY):
