@@ -148,12 +148,21 @@ def bluetooth_ports():
     return out
 
 
+def open_error(e):
+    """Понятная причина, почему порт не открылся."""
+    msg = str(e).lower()
+    if any(x in msg for x in ('busy', 'denied', 'permission', 'отказано', 'errno 16', 'errno 13')):
+        return 'занят другой программой (или другим компьютером)'
+    return f'не открылся ({e})'
+
+
 def probe(port, timeout=4.0):
-    """Открыть порт и спросить параметры. Вернуть открытый порт, если ответил робот."""
+    """Открыть порт и спросить параметры. Вернуть (порт, None), если ответил робот,
+    иначе (None, причина)."""
     try:
         ser = serial.Serial(port, 115200, timeout=0.2, write_timeout=2)
-    except (serial.SerialException, OSError):
-        return None
+    except (serial.SerialException, OSError) as e:
+        return None, open_error(e)
     try:
         time.sleep(0.5)
         ser.reset_input_buffer()
@@ -161,17 +170,83 @@ def probe(port, timeout=4.0):
         end = time.time() + timeout
         while time.time() < end:
             if b'kp=' in ser.readline():
-                return ser
-    except (serial.SerialException, OSError):
-        pass
+                return ser, None
+        why = 'открылся, но робот не отвечает'
+    except (serial.SerialException, OSError) as e:
+        why = f'связь оборвалась ({e})'
     ser.close()
-    return None
+    return None, why
+
+
+# ---------- один клиент на компьютере ----------
+# Клиент, закрытый нештатно (упал Терминал, завис на Bluetooth), может остаться
+# жить и держать порт — тогда следующий запуск робота не находит. Поэтому при
+# старте закрываем предыдущий клиент, если он ещё жив.
+LOCK = os.path.join(HERE, '.wasd.lock')
+
+
+def is_our_client(pid):
+    """Жив ли процесс pid и наш ли это wasd.py (номер мог достаться чужой программе)."""
+    if pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        if os.name == 'nt':
+            cmd = f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"
+            out = subprocess.run(['powershell', '-NoProfile', '-Command', cmd],
+                                 capture_output=True, text=True, timeout=15).stdout
+        else:
+            out = subprocess.run(['ps', '-p', str(pid), '-o', 'command='],
+                                 capture_output=True, text=True, timeout=5).stdout
+        return 'wasd.py' in out
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def kill_client(pid):
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+        return
+    import signal
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(20):                   # до 2 с на аккуратный выход
+            time.sleep(0.1)
+            os.kill(pid, 0)
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass                                  # процесса уже нет
+
+
+def take_lock():
+    try:
+        pid = int(open(LOCK, encoding='utf-8').read().strip())
+    except (OSError, ValueError):
+        pid = 0
+    if is_our_client(pid):
+        print(f'Найден незакрытый клиент (процесс {pid}) — закрываю его, чтобы освободить порт.')
+        kill_client(pid)
+        time.sleep(1.5)                       # Bluetooth-порту нужно время освободиться
+    try:
+        open(LOCK, 'w', encoding='utf-8').write(str(os.getpid()))
+    except OSError:
+        pass
+
+
+def release_lock():
+    try:
+        if int(open(LOCK, encoding='utf-8').read().strip()) == os.getpid():
+            os.remove(LOCK)
+    except (OSError, ValueError):
+        pass
 
 
 def find_robot(port_arg):
     if port_arg:
         print(f'Порт {port_arg}...')
-        return serial.Serial(port_arg, 115200, timeout=0.2, write_timeout=2), port_arg
+        try:
+            return serial.Serial(port_arg, 115200, timeout=0.2, write_timeout=2), port_arg
+        except (serial.SerialException, OSError) as e:
+            sys.exit(f'{port_arg}: {open_error(e)}')
     cands = bluetooth_ports()
     try:
         cached = open(PORT_CACHE, encoding='utf-8').read().strip()
@@ -181,15 +256,19 @@ def find_robot(port_arg):
     except OSError:
         pass
     for port in cands:
-        print(f'Ищу робота на {port}...')
-        ser = probe(port)
+        print(f'Ищу робота на {port}...', end=' ', flush=True)
+        ser, why = probe(port)
+        print('найден' if ser else why)
         if ser:
             try:
                 open(PORT_CACHE, 'w', encoding='utf-8').write(port)
             except OSError:
                 pass
             return ser, port
-    print('\nРобот не найден. Робот включён, HC-05 спарен с компьютером?')
+    print('\nРобот не найден. Что проверить:')
+    print('  - робот включён, HC-05 спарен с этим компьютером (PIN 1234);')
+    print('  - к роботу не подключён другой компьютер или телефон — у HC-05 одно подключение;')
+    print('  - если порт «занят», а других подключений нет — выключи и включи робота.')
     print('Порты в системе:')
     for p in list_ports.comports():
         print(f'  {p.device}  —  {p.description}')
@@ -297,6 +376,23 @@ def main():
     ap.add_argument('--no-log', action='store_true', help='не писать телеметрию в tools/logs')
     args = ap.parse_args()
 
+    take_lock()
+    import signal
+
+    def stop(signum, frame):                  # закрыли Терминал / kill — выйти чисто
+        raise SystemExit(0)
+    for name in ('SIGTERM', 'SIGHUP'):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), stop)
+    try:
+        run(args)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        release_lock()
+
+
+def run(args):
     ser, port = find_robot(args.port)
     print(f'Робот на {port}. Окно управления открыто — ESC для выхода.')
 
@@ -315,8 +411,23 @@ def main():
     face = 'arial,helvetica,dejavusans,liberationsans,notosans'   # с кириллицей
     fonts = (pygame.font.SysFont(face, 30, bold=True), pygame.font.SysFont(face, 20))
     clock = pygame.time.Clock()
-    next_send = next_retry = 0.0
 
+    try:
+        loop(screen, fonts, clock, link, held)
+    finally:                                  # любой выход: ESC, окно, сигнал, ошибка
+        pygame.quit()
+        if link.ser:
+            try:
+                link.ser.close()
+            except (serial.SerialException, OSError):
+                pass
+        if log:
+            log.close()
+    print('Выход: буквы больше не шлются, робот остановится и будет стоять.')
+
+
+def loop(screen, fonts, clock, link, held):
+    next_send = next_retry = 0.0
     running = True
     while running:
         for ev in pygame.event.get():
@@ -347,13 +458,6 @@ def main():
 
         draw(screen, fonts, link, held)
         clock.tick(30)
-
-    pygame.quit()
-    if link.ser:
-        link.ser.close()
-    if log:
-        log.close()
-    print('Выход: буквы больше не шлются, робот остановится и будет стоять.')
 
 
 if __name__ == '__main__':
