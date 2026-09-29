@@ -6,24 +6,66 @@
 раскладка не важна. Порт HC-05 ищется сам: клиент спрашивает у Bluetooth-портов
 параметры ("p") и берёт тот, что ответил как робот. Можно задать --port.
 
-Зависимости: pip install pygame pyserial
+Зависимости (pygame, pyserial) ставятся сами при первом запуске.
 Телеметрия пишется в tools/logs/wasd-*.log (разбор: turnstat.py, stopstat.py).
 """
 import argparse
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
 
-try:
-    import pygame
-    import serial
-    from serial.tools import list_ports
-except ImportError as e:
-    sys.exit(f'Не хватает пакета ({e.name}). Установи: pip install pygame pyserial')
-
 HERE = os.path.dirname(os.path.abspath(__file__))
+VENV = os.path.join(HERE, '.venv')
+VENV_PY = os.path.join(VENV, 'Scripts', 'python.exe') if os.name == 'nt' else os.path.join(VENV, 'bin', 'python')
+DEPS = ['pygame', 'pyserial']
+
+
+def have_deps():
+    import importlib
+    importlib.invalidate_caches()            # увидеть пакеты, поставленные только что
+    try:
+        import pygame, serial  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def rerun_in(python):
+    """Перезапустить клиент другим интерпретатором с теми же аргументами."""
+    sys.exit(subprocess.call([python, os.path.abspath(__file__)] + sys.argv[1:]))
+
+
+def ensure_deps():
+    """Нет pygame/pyserial — поставить. Сначала обычным pip; если система не
+    даёт (Linux/Homebrew, PEP 668) — в своё окружение tools/.venv."""
+    if have_deps():
+        return
+    in_venv = os.path.abspath(sys.executable) == os.path.abspath(VENV_PY)
+    if not in_venv and os.path.exists(VENV_PY):
+        rerun_in(VENV_PY)                    # окружение уже есть с прошлого раза
+    print(f'Не хватает пакетов, ставлю: {" ".join(DEPS)}...')
+    pip = [sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', *DEPS]
+    if subprocess.call(pip) == 0 and have_deps():
+        return
+    if in_venv:
+        sys.exit(f'Не удалось поставить пакеты. Вручную: {sys.executable} -m pip install {" ".join(DEPS)}')
+    print(f'Обычная установка не прошла — создаю окружение {VENV}...')
+    if subprocess.call([sys.executable, '-m', 'venv', VENV]) != 0:
+        sys.exit('Не удалось создать окружение. На Debian/Ubuntu: sudo apt install python3-venv, '
+                 f'или поставь пакеты сам: pip install {" ".join(DEPS)}')
+    if subprocess.call([VENV_PY, '-m', 'pip', 'install', '--disable-pip-version-check', *DEPS]) != 0:
+        sys.exit(f'Не удалось поставить пакеты в {VENV}. Проверь интернет.')
+    rerun_in(VENV_PY)
+
+
+ensure_deps()
+import pygame  # noqa: E402
+import serial  # noqa: E402
+from serial.tools import list_ports  # noqa: E402
+
 PORT_CACHE = os.path.join(HERE, '.wasd_port')   # последний рабочий порт — пробуем первым
 RATE = 10.0                                      # букв в секунду (прошивка ждёт 250 мс)
 

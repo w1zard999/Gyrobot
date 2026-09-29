@@ -10,3 +10,4 @@ build/
 tools/logs/
 __pycache__/
 tools/.wasd_port
+tools/.venv/
