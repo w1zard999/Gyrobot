@@ -72,6 +72,13 @@ float KWI  = 0.5f;    // И: ШИМ за 40 мс на имп — П оставл
 #define WPD 0.095f    // имп/40мс колеса на °/с рыскания: из логов, 80 °/с ≈ 7.5 имп/40мс
 float FLA  = 10;      // прямая подача лишнего трения левого колеса, ШИМ (в воздухе моторы равны)
 float PKS  = 3.0f;    // множитель KSP в повороте: 0.5 хуже, 1.5/2.5 лучше, 3 — выбрано, 4 качка
+// Возврат домой по прямой: TURN — к дому, DRIVE — ехать, FACE — в исходный курс
+enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE };
+uint8_t nav = NAV_IDLE;
+float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
+float KND  = 0.5f;    // имп/40мс скорости на см до дома (замедление на подходе)
+float NTOL = 5;       // см: дома
+#define NAV_YMIN 25   // °/с — меньше тугое колесо не сдвинет
 float TBA  = 1.6f;    // доля поворота левого колеса в повороте на ходу (W+A): левое на полу туже
 
 // ---------- Состояние ----------
@@ -228,6 +235,7 @@ void resetLoops() {                                      // взвод и пад
   tW = tS = tA = tD = 0;
   stopping = false; lastFwd = 0; pivot = false; wIA = wIB = 0;
   odoReset();                                            // новый взвод — новый дом
+  nav = NAV_IDLE;
   heading = headTgt = 0;
 }
 
@@ -254,19 +262,54 @@ void updateWheelSpeeds() {                               // каждые 5 мс
 // ---------- WASD: цели с рампой ----------
 bool held(uint32_t t) { return t && millis() - t < KEY_MS; }
 
+float navTurn(float err, float lim) {         // поворот с мин. скоростью, не больше lim
+  float y = constrain(KNT * err, -lim, lim);
+  if (fabs(y) < NAV_YMIN) y = (err >= 0) ? NAV_YMIN : -NAV_YMIN;
+  return y;
+}
+
+// Раз в 40 мс: цели скорости (имп/40мс) и поворота (°/с) для возврата
+void navTargets(float& mt, float& yt) {
+  mt = 0; yt = 0;
+  float dx = -odoX * 0.1f, dy = -odoY * 0.1f;           // см до дома
+  float dist = sqrt(dx * dx + dy * dy);
+  float err = wrap180(atan2(dy, dx) * 57.2958f - odoTh); // куда повернуть к дому
+  if (nav == NAV_TURN) {
+    if (dist < NTOL) nav = NAV_FACE;
+    else if (fabs(err) < 10) nav = NAV_DRIVE;
+    else yt = navTurn(err, YMAX);
+  }
+  if (nav == NAV_DRIVE) {
+    if (dist < NTOL || fabs(err) > 90) nav = NAV_FACE;    // дома или проскочили
+    else if (fabs(err) > 45) nav = NAV_TURN;              // сильно сбились — довернуть
+    else {
+      mt = constrain(KND * dist, 4.0f, MOVE);
+      yt = constrain(KNT * err, -40.0f, 40.0f);           // подруливание на ходу
+    }
+  }
+  if (nav == NAV_FACE && moveSet == 0) {                  // довернуть, когда встал
+    float e = wrap180(-odoTh);
+    if (fabs(e) < 5) nav = NAV_IDLE;
+    else yt = navTurn(e, YMAX);
+  }
+}
+
 void updateTargets() {                                   // раз в 40 мс
   int fwd = (int)held(tW) - (int)held(tS);
   int lr  = (int)held(tA) - (int)held(tD);
-  if (fwd && !lastFwd && !stopping) posRest = posI;     // начало езды: запомнить стоянку
-  if (fwd) stopping = false;
-  else if (lastFwd) stopping = true;                    // отпустил W/S
-  lastFwd = fwd;
-  float mt = fwd * MOVE;
+  if (fwd || lr) nav = NAV_IDLE;                          // человек перехватил управление
+  float mt, yt;
+  if (nav) navTargets(mt, yt);
+  else { mt = fwd * MOVE; yt = lr * YMAX; }
+  int8_t drv = fwd ? fwd : (nav == NAV_DRIVE ? 1 : 0);   // езда: клавишей или автоматом
+  if (drv && !lastFwd && !stopping) posRest = posI;     // начало езды: запомнить стоянку
+  if (drv) stopping = false;
+  else if (lastFwd) stopping = true;                    // конец езды
+  lastFwd = drv;
   // рампа RAMP_UP/RAMP_DN имп/40мс за тик (2 ≈ 0.5 м/с², наклон ≈3°)
   float step = (fabs(mt) > fabs(moveSet)) ? RAMP_UP : RAMP_DN;
   moveSet += constrain(mt - moveSet, -step, step);
-  float yt = lr * YMAX;
-  if (lr == 0) turnSet = 0;                              // отпустил — сразу ноль, тормозит KT
+  if (yt == 0) turnSet = 0;                              // отпустил — сразу ноль, тормозит KT
   else turnSet += constrain(yt - turnSet, -15.0f, 15.0f);
 }
 
@@ -358,7 +401,7 @@ void controlTick() {
 // новые значения из кода). Повреждённая или пустая память — тоже заводские.
 float* const CFG[] = {&KP, &KD, &KSP, &KSI, &ILIM, &KT, &TFF, &KH, &YMAX, &MOVE, &AZ,
                       &DBA, &DBB, &FALL, &RAMP_UP, &RAMP_DN, &BLEED, &KW, &KWI, &FLA,
-                      &PKS, &TBA};
+                      &PKS, &TBA, &KNT, &KND, &NTOL};
 const uint8_t CFG_N = sizeof(CFG) / sizeof(CFG[0]);
 #define CFG_MAGIC 0x4731              // «G1»
 float cfgFactory[CFG_N];              // заводские значения этой прошивки (копия при старте)
@@ -440,7 +483,10 @@ void printParams() {
   Serial.print(F(" kw=")); Serial.print(KW, 2);
   Serial.print(F(" kwi=")); Serial.print(KWI, 2);
   Serial.print(F(" fla=")); Serial.print(FLA, 0);
-  Serial.print(F(" pks=")); Serial.println(PKS, 2);
+  Serial.print(F(" pks=")); Serial.print(PKS, 2);
+  Serial.print(F(" knt=")); Serial.print(KNT, 2);
+  Serial.print(F(" knd=")); Serial.print(KND, 2);
+  Serial.print(F(" ntol=")); Serial.println(NTOL, 0);
 
 }
 
@@ -466,6 +512,8 @@ void applyLine(char* line) {
   float v = atof(val);
   uint32_t now = millis();
 
+  if (!strcmp(line, "h")) { if (armed) nav = NAV_TURN; return; }   // домой
+  if (!strcmp(line, "x")) { nav = NAV_IDLE; return; }                // стоп возврата
   if (!line[1] && strchr("wsad", line[0])) {             // буквы WASD — без ответа
     if (line[0] == 'w') tW = now; else if (line[0] == 's') tS = now;
     else if (line[0] == 'a') tA = now; else tD = now;
@@ -502,6 +550,9 @@ void applyLine(char* line) {
   else if (!strcmp(line, "kwi") && v >= 0) KWI = v;
   else if (!strcmp(line, "fla") && v >= 0) FLA = v;
   else if (!strcmp(line, "pks") && v >= 0) PKS = v;
+  else if (!strcmp(line, "knt") && v > 0) KNT = v;
+  else if (!strcmp(line, "knd") && v > 0) KND = v;
+  else if (!strcmp(line, "ntol") && v > 0) NTOL = v;
   else if (!strcmp(line, "kh") && v >= 0) { KH = v; headTgt = heading; }
   else { Serial.println(F("?")); return; }
   Serial.println(F("ok"));
@@ -533,6 +584,7 @@ void telemetry() {                                       // ~10 Гц
   Serial.print(F(" px=")); Serial.print(odoX * 0.1f, 0);
   Serial.print(F(" py=")); Serial.print(odoY * 0.1f, 0);
   Serial.print(F(" ph=")); Serial.print(odoTh, 0);
+  Serial.print(F(" nav=")); Serial.print(nav);
   Serial.print(F(" hz=")); Serial.print(hz);
   Serial.print(F(" ie=")); Serial.println(imuErr);
 }
