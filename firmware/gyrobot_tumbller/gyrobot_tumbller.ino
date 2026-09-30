@@ -14,6 +14,7 @@
 // энкодеры + = вперёд; рыскание + = поворот влево.
 // ============================================================
 #include <Wire.h>
+#include <EEPROM.h>
 
 // ---------- Пины (docs/STATUS.md, прозвонено 2026-09-07) ----------
 #define PWMA 9      // A = левое колесо
@@ -330,6 +331,72 @@ void controlTick() {
 }
 
 // ---------- Сериал: WASD, параметры, тесты ----------
+// ---------- Настройки в EEPROM: save / defaults ----------
+// Сохраняются все настраиваемые параметры (не калибровка — она при каждом старте).
+// Вместе с ними — «отпечаток» заводских значений прошивки: если после перепрошивки
+// заводские в коде другие, сохранённое игнорируется (иначе старое молча перебило бы
+// новые значения из кода). Повреждённая или пустая память — тоже заводские.
+float* const CFG[] = {&KP, &KD, &KSP, &KSI, &ILIM, &KT, &TFF, &KH, &YMAX, &MOVE, &AZ,
+                      &DBA, &DBB, &FALL, &RAMP_UP, &RAMP_DN, &BLEED, &KW, &KWI, &FLA,
+                      &PKS, &TBA};
+const uint8_t CFG_N = sizeof(CFG) / sizeof(CFG[0]);
+#define CFG_MAGIC 0x4731              // «G1»
+float cfgFactory[CFG_N];              // заводские значения этой прошивки (копия при старте)
+uint32_t cfgFactoryHash = 0;
+
+uint32_t fnv(const uint8_t* p, uint16_t n, uint32_t h = 2166136261UL) {
+  while (n--) { h ^= *p++; h *= 16777619UL; }
+  return h;
+}
+
+// Раскладка: magic(2) | N(1) | отпечаток заводских(4) | N float | контрольная сумма(4)
+uint32_t cfgStoredSum(uint16_t len) {                     // сумма байтов 0..len-1 в EEPROM
+  uint32_t h = 2166136261UL;
+  for (uint16_t i = 0; i < len; i++) { uint8_t b = EEPROM.read(i); h = fnv(&b, 1, h); }
+  return h;
+}
+
+void cfgSave() {
+  uint16_t a = 0;
+  uint16_t magic = CFG_MAGIC;
+  EEPROM.put(a, magic); a += 2;
+  EEPROM.update(a, CFG_N); a += 1;
+  EEPROM.put(a, cfgFactoryHash); a += 4;
+  for (uint8_t i = 0; i < CFG_N; i++) { EEPROM.put(a, *CFG[i]); a += 4; }
+  EEPROM.put(a, cfgStoredSum(a));
+  Serial.println(F("сохранено в память робота"));
+}
+
+// 0 — загружено; 1 — памяти нет/повреждена; 2 — прошивка с другими заводскими
+uint8_t cfgLoad() {
+  uint16_t magic; uint32_t fh, sum;
+  EEPROM.get(0, magic);
+  if (magic != CFG_MAGIC || EEPROM.read(2) != CFG_N) return 1;
+  uint16_t end = 7 + 4 * CFG_N;
+  EEPROM.get(end, sum);
+  if (sum != cfgStoredSum(end)) return 1;
+  EEPROM.get(3, fh);
+  if (fh != cfgFactoryHash) return 2;
+  for (uint8_t i = 0; i < CFG_N; i++) EEPROM.get(7 + 4 * i, *CFG[i]);
+  return 0;
+}
+
+void cfgInit() {                                          // в setup, до первого printParams
+  for (uint8_t i = 0; i < CFG_N; i++) cfgFactory[i] = *CFG[i];
+  cfgFactoryHash = fnv((const uint8_t*)cfgFactory, sizeof(cfgFactory));
+  uint8_t r = cfgLoad();
+  if (r == 0) Serial.println(F("настройки: из памяти робота (save)"));
+  else if (r == 2) Serial.println(F("настройки: заводские — прошивка новая, сохранённые не подходят"));
+  else Serial.println(F("настройки: заводские"));
+}
+
+void cfgDefaults() {
+  for (uint8_t i = 0; i < CFG_N; i++) *CFG[i] = cfgFactory[i];
+  uint16_t zero = 0;
+  EEPROM.put(0, zero);                                    // стереть метку — при старте заводские
+  Serial.println(F("заводские настройки, память очищена"));
+}
+
 void printParams() {
   Serial.print(F("kp=")); Serial.print(KP, 2);
   Serial.print(F(" kd=")); Serial.print(KD, 3);
@@ -385,7 +452,9 @@ void applyLine(char* line) {
     return;
   }
   if (!strcmp(line, "p")) { printParams(); return; }
-  if (!strcmp(line, "s")) { stream = hasVal ? v != 0 : !stream; return; }
+  if (!strcmp(line, "tele")) { stream = hasVal ? v != 0 : !stream; return; }   // не "s": это WASD
+  if (!strcmp(line, "save")) { cfgSave(); return; }
+  if (!strcmp(line, "defaults")) { cfgDefaults(); printParams(); return; }
   if (!strcmp(line, "z")) { AZ = angle; Serial.print(F("az=")); Serial.println(AZ, 2); return; }
   if (!strcmp(line, "t")) { motorTest(hasVal ? (int)v : 60); return; }
   if (!hasVal) { Serial.println(F("?")); return; }
@@ -457,6 +526,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ECB_A), isrB, RISING);
 
   Serial.begin(115200);
+  cfgInit();
   Wire.begin();
   Wire.setClock(400000);
   Wire.setWireTimeout(25000, true);                      // без этого I2C висел от помех моторов
