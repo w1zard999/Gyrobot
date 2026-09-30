@@ -65,7 +65,6 @@ float BLEED = 20;     // после отпускания W/S интеграл п
 // колёс по периоду импульсов (200 Гц), только по РАЗНОСТИ колёс — общей скоростью
 // владеет баланс (прямое управление ей = «неверный» знак, разгон через ~1 с);
 // прямая подача трения левого; усиленный демпфер KSP·v (иначе центр качается — восьмёрка).
-bool  PIVOT = true;   // поворот на месте по скоростям колёс (pvt 0 — обычный поворот по гироскопу)
 float KW   = 4.0f;    // П: ШИМ на имп/40мс ошибки разности колёс; 8 — рывки
 float KWI  = 0.5f;    // И: ШИМ за 40 мс на имп — П оставляет тугое колесо стоять, интеграл докручивает
 #define WI_LIM 80     // потолок интегральной добавки, ШИМ
@@ -84,7 +83,6 @@ uint32_t uprightSince = 0;
 volatile long encA = 0, encB = 0;          // для контура скорости (обнуляются каждые 40 мс)
 volatile long totA = 0, totB = 0;          // накопительные, для теста 't'
 float vF = 0, posI = 0, speedOut = 0;
-float vAF = 0, vBF = 0;                    // скорость каждого колеса (телеметрия)
 float moveSet = 0, turnSet = 0;
 float heading = 0, headTgt = 0;           // курс по гироскопу Z и его цель, °
 float posRest = 0;                         // интеграл положения до начала езды
@@ -208,7 +206,7 @@ void motorsOff() { analogWrite(PWMA, 0); analogWrite(PWMB, 0); uL = uR = 0; }
 
 void resetLoops() {                                      // взвод и падение: всё с нуля
   noInterrupts(); encA = encB = 0; interrupts();
-  vF = posI = speedOut = 0; vAF = vBF = 0;
+  vF = posI = speedOut = 0;
   moveSet = turnSet = 0;
   spdCnt = 0;
   tW = tS = tA = tD = 0;
@@ -299,10 +297,8 @@ void controlTick() {
     noInterrupts(); long cA = encA, cB = encB; encA = encB = 0; interrupts();
     float v = (cA + cB) * 0.5f;                          // имп/40мс, + вперёд
     vF = 0.7f * vF + 0.3f * v;                           // фильтр Tumbller
-    vAF = 0.7f * vAF + 0.3f * cA;
-    vBF = 0.7f * vBF + 0.3f * cB;
     updateTargets();
-    pivot = PIVOT && turnSet != 0 && moveSet == 0;         // поворот на месте, см. PIVOT
+    pivot = turnSet != 0 && moveSet == 0;                  // поворот на месте (A/D без W/S)
     posI = constrain(posI + vF - moveSet, -ILIM, ILIM);    // положение минус цель
     if (stopping) {                                        // забываем отставание от цели
       float d = posRest - posI;
@@ -354,7 +350,6 @@ void printParams() {
   Serial.print(F(" bleed=")); Serial.print(BLEED, 0);
   Serial.print(F(" tff=")); Serial.print(TFF, 2);
   Serial.print(F(" kh=")); Serial.print(KH, 2);
-  Serial.print(F(" pvt=")); Serial.print(PIVOT);
   Serial.print(F(" kw=")); Serial.print(KW, 2);
   Serial.print(F(" kwi=")); Serial.print(KWI, 2);
   Serial.print(F(" fla=")); Serial.print(FLA, 0);
@@ -364,42 +359,6 @@ void printParams() {
 
 // Тест моторов (только когда не взведён): оба колеса «вперёд» 1 с,
 // оба счётчика обязаны вырасти в плюс
-// ЗАМЕР (диагностика, 2026-09-28): ступенька ШИМ на оба колеса, робот лежит на боку.
-// 100 отсчётов по 5 мс: 60 под ШИМ, 40 после выключения. На каждый отсчёт —
-// импульсы за 5 мс и последний период между фронтами. Для оценки постоянной
-// времени мотора и шума скорости перед внутренним регулятором скорости колёс.
-#define STEP_N 100
-#define STEP_ON 60
-void stepTest(int pwm) {
-  if (armed) { Serial.println(F("сначала положи робота (не взведён)")); return; }
-  static int8_t sa[STEP_N], sb[STEP_N];
-  static uint16_t qa[STEP_N], qb[STEP_N];
-  noInterrupts(); encA = encB = 0; perA = perB = 0; interrupts();
-  uint32_t t = micros();
-  for (uint8_t i = 0; i < STEP_N; i++) {
-    if (i == 0) { motorOut(PWMA, AIN1, AIN2, pwm, 0); motorOut(PWMB, BIN1, BIN2, pwm, 0); }
-    if (i == STEP_ON) motorsOff();
-    t += 5000;
-    while ((long)(micros() - t) < 0) {}
-    noInterrupts();
-    sa[i] = constrain(encA, -127, 127); sb[i] = constrain(encB, -127, 127); encA = encB = 0;
-    uint32_t now = micros();
-    qa[i] = (now - edgeA > 65535) ? 65535 : perA;   // колесо давно стоит — период «бесконечный»
-    qb[i] = (now - edgeB > 65535) ? 65535 : perB;
-    interrupts();
-  }
-  motorsOff();
-  Serial.print(F("step pwm=")); Serial.println(pwm);
-  Serial.println(F("i,cA,cB,perA,perB"));
-  for (uint8_t i = 0; i < STEP_N; i++) {
-    Serial.print(i); Serial.print(','); Serial.print(sa[i]); Serial.print(',');
-    Serial.print(sb[i]); Serial.print(','); Serial.print(qa[i]); Serial.print(',');
-    Serial.println(qb[i]);
-  }
-  Serial.println(F("step end"));
-  tNext = micros();
-}
-
 void motorTest(int pwm) {
   if (armed) { Serial.println(F("сначала положи робота (не взведён)")); return; }
   noInterrupts(); totA = totB = 0; interrupts();
@@ -429,7 +388,6 @@ void applyLine(char* line) {
   if (!strcmp(line, "s")) { stream = hasVal ? v != 0 : !stream; return; }
   if (!strcmp(line, "z")) { AZ = angle; Serial.print(F("az=")); Serial.println(AZ, 2); return; }
   if (!strcmp(line, "t")) { motorTest(hasVal ? (int)v : 60); return; }
-  if (!strcmp(line, "step")) { stepTest(hasVal ? (int)v : 80); return; }
   if (!hasVal) { Serial.println(F("?")); return; }
 
   if      (!strcmp(line, "kp"))   KP = v;
@@ -450,7 +408,6 @@ void applyLine(char* line) {
   else if (!strcmp(line, "tba") && v > 0) TBA = v;
   else if (!strcmp(line, "bleed") && v >= 0) BLEED = v;
   else if (!strcmp(line, "tff") && v >= 0) TFF = v;
-  else if (!strcmp(line, "pvt")) PIVOT = v != 0;
   else if (!strcmp(line, "kw") && v >= 0) KW = v;
   else if (!strcmp(line, "kwi") && v >= 0) KWI = v;
   else if (!strcmp(line, "fla") && v >= 0) FLA = v;
