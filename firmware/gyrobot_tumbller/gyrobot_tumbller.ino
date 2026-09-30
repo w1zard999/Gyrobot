@@ -96,6 +96,21 @@ uint8_t spdCnt = 0;
 uint32_t tW = 0, tS = 0, tA = 0, tD = 0;   // время последней буквы
 float uL = 0, uR = 0;
 
+// ---------- Одометрия ----------
+// Путь по энкодерам, курс по гироскопу Z (колёса на поворотах проскальзывают).
+// Дом — (0,0), курс 0: ставится при взводе и командой home.
+#define MM_PER_CNT 0.3998f            // π·63 мм / 495 имп; уточнить по рулетке
+float odoX = 0, odoY = 0;             // мм: x — вперёд от дома, y — влево
+float odoTh = 0;                      // курс, °, + влево, −180…180
+
+float wrap180(float a) {
+  while (a > 180) a -= 360;
+  while (a < -180) a += 360;
+  return a;
+}
+
+void odoReset() { odoX = odoY = odoTh = 0; }
+
 uint32_t tNext = 0, tickCnt = 0, hzMark = 0;
 uint16_t hz = 0, hzCnt = 0, imuErr = 0;
 bool stream = true;
@@ -212,6 +227,7 @@ void resetLoops() {                                      // взвод и пад
   spdCnt = 0;
   tW = tS = tA = tD = 0;
   stopping = false; lastFwd = 0; pivot = false; wIA = wIB = 0;
+  odoReset();                                            // новый взвод — новый дом
   heading = headTgt = 0;
 }
 
@@ -298,6 +314,9 @@ void controlTick() {
     noInterrupts(); long cA = encA, cB = encB; encA = encB = 0; interrupts();
     float v = (cA + cB) * 0.5f;                          // имп/40мс, + вперёд
     vF = 0.7f * vF + 0.3f * v;                           // фильтр Tumbller
+    float ds = (cA + cB) * 0.5f * MM_PER_CNT;          // мм за 40 мс, + вперёд
+    odoX += ds * cos(odoTh * 0.0174533f);
+    odoY += ds * sin(odoTh * 0.0174533f);
     updateTargets();
     pivot = turnSet != 0 && moveSet == 0;                  // поворот на месте (A/D без W/S)
     posI = constrain(posI + vF - moveSet, -ILIM, ILIM);    // положение минус цель
@@ -310,6 +329,7 @@ void controlTick() {
   }
 
   heading += yawR * dt;
+  odoTh = wrap180(odoTh + yawR * dt);
   if (turnSet != 0) headTgt = heading;                  // в повороте цель курса едет с роботом
   float hErr = constrain(headTgt - heading, -30.0f, 30.0f);
   float turn = TFF * turnSet + KT * (turnSet - yawR) + KH * hErr;   // >0 → правое быстрее → влево
@@ -454,6 +474,7 @@ void applyLine(char* line) {
   if (!strcmp(line, "p")) { printParams(); return; }
   if (!strcmp(line, "tele")) { stream = hasVal ? v != 0 : !stream; return; }   // не "s": это WASD
   if (!strcmp(line, "save")) { cfgSave(); return; }
+  if (!strcmp(line, "home")) { odoReset(); Serial.println(F("дом здесь")); return; }
   if (!strcmp(line, "defaults")) { cfgDefaults(); printParams(); return; }
   if (!strcmp(line, "z")) { AZ = angle; Serial.print(F("az=")); Serial.println(AZ, 2); return; }
   if (!strcmp(line, "t")) { motorTest(hasVal ? (int)v : 60); return; }
@@ -509,6 +530,9 @@ void telemetry() {                                       // ~10 Гц
   Serial.print(F(" h=")); Serial.print(heading - headTgt, 1);
   Serial.print(F(" uL=")); Serial.print(uL, 0);
   Serial.print(F(" uR=")); Serial.print(uR, 0);
+  Serial.print(F(" px=")); Serial.print(odoX * 0.1f, 0);
+  Serial.print(F(" py=")); Serial.print(odoY * 0.1f, 0);
+  Serial.print(F(" ph=")); Serial.print(odoTh, 0);
   Serial.print(F(" hz=")); Serial.print(hz);
   Serial.print(F(" ie=")); Serial.println(imuErr);
 }

@@ -12,3 +12,6 @@ __pycache__/
 tools/.wasd_port
 tools/.venv/
 tools/.wasd.lock
+
+# рабочие файлы планов (superpowers)
+.superpowers/
