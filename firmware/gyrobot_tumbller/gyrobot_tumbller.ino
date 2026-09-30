@@ -76,6 +76,8 @@ float PKS  = 3.0f;    // множитель KSP в повороте: 0.5 хуж�
 enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE };
 uint8_t nav = NAV_IDLE;
 bool faceGo = false;                  // доворот дома начался
+uint32_t navStart = 0;                // когда начат возврат
+#define NAV_MAX_MS 30000UL            // дольше — сдаёмся: упёрся в препятствие или качается у цели
 float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
 float KND  = 0.3f;    // имп/40мс скорости на см до дома (0.5 — тормозил поздно, подъезжал на 20)
 float NTOL = 5;       // см: дома
@@ -305,6 +307,7 @@ void updateTargets() {                                   // раз в 40 мс
   int fwd = (int)held(tW) - (int)held(tS);
   int lr  = (int)held(tA) - (int)held(tD);
   if (fwd || lr) nav = NAV_IDLE;                          // человек перехватил управление
+  if (nav && millis() - navStart > NAV_MAX_MS) nav = NAV_IDLE;   // не бесконечно (стена, BT пропал)
   float mt, yt;
   if (nav) navTargets(mt, yt);
   else { mt = fwd * MOVE; yt = lr * YMAX; }
@@ -526,7 +529,7 @@ void applyLine(char* line) {
   float v = atof(val);
   uint32_t now = millis();
 
-  if (!strcmp(line, "h")) { if (armed) { nav = NAV_TURN; faceGo = false; } return; }   // домой
+  if (!strcmp(line, "h")) { if (armed) { nav = NAV_TURN; faceGo = false; navStart = millis(); } return; }   // домой
   if (!strcmp(line, "x")) { nav = NAV_IDLE; return; }                // стоп возврата
   if (!line[1] && strchr("wsad", line[0])) {             // буквы WASD — без ответа
     if (line[0] == 'w') tW = now; else if (line[0] == 's') tS = now;
