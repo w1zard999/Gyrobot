@@ -121,6 +121,7 @@ from wasdmap import MapView, Trail, parse_pose  # noqa: E402
 
 PORT_CACHE = os.path.join(HERE, '.wasd_port')   # последний рабочий порт — пробуем первым
 RATE = 10.0                                      # букв в секунду (прошивка ждёт 250 мс)
+CMS_PER_UNIT = 0.694 / 0.4                      # v в телеметрии — имп/40мс; 0.694 мм/имп (рулетка)
 
 # физические клавиши (SDL scancode) -> буква протокола
 KEYMAP = {
@@ -377,7 +378,7 @@ def draw(screen, fonts, link, held):
         armed, a, v, yr = link.tele
         lines = [('балансирует' if armed else 'лежит / ждёт калибровки'),
                  f'наклон  {a:+5.1f}°',
-                 f'скорость  {v:+5.1f} см/с',
+                 f'скорость  {v * CMS_PER_UNIT:+5.1f} см/с',
                  f'поворот  {yr:+4d} °/с']
     else:
         lines = ['телеметрии пока нет']
