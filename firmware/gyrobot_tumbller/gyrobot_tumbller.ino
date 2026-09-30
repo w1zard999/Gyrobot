@@ -75,6 +75,7 @@ float PKS  = 3.0f;    // множитель KSP в повороте: 0.5 хуж�
 // Возврат домой по прямой: TURN — к дому, DRIVE — ехать, FACE — в исходный курс
 enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE };
 uint8_t nav = NAV_IDLE;
+bool faceGo = false;                  // доворот дома начался
 float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
 float KND  = 0.3f;    // имп/40мс скорости на см до дома (0.5 — тормозил поздно, подъезжал на 20)
 float NTOL = 5;       // см: дома
@@ -290,7 +291,9 @@ void navTargets(float& mt, float& yt) {
       yt = constrain(KNT * err, -40.0f, 40.0f);           // подруливание на ходу
     }
   }
-  if (nav == NAV_FACE && moveSet == 0 && fabs(vF) < FACE_V) {  // довернуть, когда реально встал
+  if (nav == NAV_FACE && moveSet == 0 && fabs(vF) < FACE_V) faceGo = true;   // встал — можно
+  if (nav == NAV_FACE && faceGo) {                        // дальше без проверки скорости: иначе
+                                                          // доворот замирал при v≈3 — рывками
     float e = wrap180(-odoTh);
     if (fabs(e) < 5) nav = NAV_IDLE;
     else yt = navTurn(e, YMAX);
@@ -364,7 +367,9 @@ void controlTick() {
     odoX += ds * cos(odoTh * 0.0174533f);
     odoY += ds * sin(odoTh * 0.0174533f);
     updateTargets();
-    pivot = turnSet != 0 && moveSet == 0;                  // поворот на месте (A/D без W/S)
+    // поворот на месте = A/D без W/S (и без езды автоматом). Не по moveSet: после
+    // отпускания W цель скорости гаснет ещё ~1.3 с, и поворот шёл одним колесом
+    pivot = turnSet != 0 && lastFwd == 0;
     posI = constrain(posI + vF - moveSet, -ILIM, ILIM);    // положение минус цель
     if (stopping) {                                        // забываем отставание от цели
       float d = posRest - posI;
@@ -519,7 +524,7 @@ void applyLine(char* line) {
   float v = atof(val);
   uint32_t now = millis();
 
-  if (!strcmp(line, "h")) { if (armed) nav = NAV_TURN; return; }   // домой
+  if (!strcmp(line, "h")) { if (armed) { nav = NAV_TURN; faceGo = false; } return; }   // домой
   if (!strcmp(line, "x")) { nav = NAV_IDLE; return; }                // стоп возврата
   if (!line[1] && strchr("wsad", line[0])) {             // буквы WASD — без ответа
     if (line[0] == 'w') tW = now; else if (line[0] == 's') tS = now;
