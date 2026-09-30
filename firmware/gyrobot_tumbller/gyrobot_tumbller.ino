@@ -76,9 +76,10 @@ float PKS  = 3.0f;    // множитель KSP в повороте: 0.5 хуж�
 enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE };
 uint8_t nav = NAV_IDLE;
 float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
-float KND  = 0.5f;    // имп/40мс скорости на см до дома (замедление на подходе)
+float KND  = 0.3f;    // имп/40мс скорости на см до дома (0.5 — тормозил поздно, подъезжал на 20)
 float NTOL = 5;       // см: дома
 #define NAV_YMIN 25   // °/с — меньше тугое колесо не сдвинет
+#define PIV_V 3       // имп/40мс: быстрее — поворот на месте не включать (робот ещё катится)
 float TBA  = 1.6f;    // доля поворота левого колеса в повороте на ходу (W+A): левое на полу туже
 
 // ---------- Состояние ----------
@@ -288,7 +289,7 @@ void navTargets(float& mt, float& yt) {
       yt = constrain(KNT * err, -40.0f, 40.0f);           // подруливание на ходу
     }
   }
-  if (nav == NAV_FACE && moveSet == 0) {                  // довернуть, когда встал
+  if (nav == NAV_FACE && moveSet == 0 && fabs(vF) < PIV_V) {   // довернуть, когда реально встал
     float e = wrap180(-odoTh);
     if (fabs(e) < 5) nav = NAV_IDLE;
     else yt = navTurn(e, YMAX);
@@ -362,7 +363,9 @@ void controlTick() {
     odoX += ds * cos(odoTh * 0.0174533f);
     odoY += ds * sin(odoTh * 0.0174533f);
     updateTargets();
-    pivot = turnSet != 0 && moveSet == 0;                  // поворот на месте (A/D без W/S)
+    // поворот на месте (A/D без W/S) — только когда робот почти стоит: на ходу
+    // PKS×KSP×v давал удар до ШИМ 255 и наклон ±28° (доворот дома на скорости 17)
+    pivot = turnSet != 0 && moveSet == 0 && fabs(vF) < PIV_V;
     posI = constrain(posI + vF - moveSet, -ILIM, ILIM);    // положение минус цель
     if (stopping) {                                        // забываем отставание от цели
       float d = posRest - posI;
