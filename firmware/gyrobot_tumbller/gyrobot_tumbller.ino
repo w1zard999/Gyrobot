@@ -79,6 +79,7 @@ bool faceGo = false;                  // доворот дома начался
 float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
 float KND  = 0.3f;    // имп/40мс скорости на см до дома (0.5 — тормозил поздно, подъезжал на 20)
 float NTOL = 5;       // см: дома
+float FTOL = 2;       // °: доворот в исходный курс (5 — недокручивал ~5°)
 #define NAV_YMIN 25   // °/с — меньше тугое колесо не сдвинет
 #define PIV_V 6       // имп/40мс: к этой скорости усиленный демпфер поворота гаснет до обычного
 #define FACE_V 3      // имп/40мс: доворот дома — только когда робот почти встал
@@ -295,7 +296,7 @@ void navTargets(float& mt, float& yt) {
   if (nav == NAV_FACE && faceGo) {                        // дальше без проверки скорости: иначе
                                                           // доворот замирал при v≈3 — рывками
     float e = wrap180(-odoTh);
-    if (fabs(e) < 5) nav = NAV_IDLE;
+    if (fabs(e) < FTOL) nav = NAV_IDLE;
     else yt = navTurn(e, YMAX);
   }
 }
@@ -413,7 +414,7 @@ void controlTick() {
 // новые значения из кода). Повреждённая или пустая память — тоже заводские.
 float* const CFG[] = {&KP, &KD, &KSP, &KSI, &ILIM, &KT, &TFF, &KH, &YMAX, &MOVE, &AZ,
                       &DBA, &DBB, &FALL, &RAMP_UP, &RAMP_DN, &BLEED, &KW, &KWI, &FLA,
-                      &PKS, &TBA, &KNT, &KND, &NTOL};
+                      &PKS, &TBA, &KNT, &KND, &NTOL, &FTOL};
 const uint8_t CFG_N = sizeof(CFG) / sizeof(CFG[0]);
 #define CFG_MAGIC 0x4731              // «G1»
 float cfgFactory[CFG_N];              // заводские значения этой прошивки (копия при старте)
@@ -498,7 +499,8 @@ void printParams() {
   Serial.print(F(" pks=")); Serial.print(PKS, 2);
   Serial.print(F(" knt=")); Serial.print(KNT, 2);
   Serial.print(F(" knd=")); Serial.print(KND, 2);
-  Serial.print(F(" ntol=")); Serial.println(NTOL, 0);
+  Serial.print(F(" ntol=")); Serial.print(NTOL, 0);
+  Serial.print(F(" ftol=")); Serial.println(FTOL, 1);
 
 }
 
@@ -565,6 +567,7 @@ void applyLine(char* line) {
   else if (!strcmp(line, "knt") && v > 0) KNT = v;
   else if (!strcmp(line, "knd") && v > 0) KND = v;
   else if (!strcmp(line, "ntol") && v > 0) NTOL = v;
+  else if (!strcmp(line, "ftol") && v > 0) FTOL = v;
   else if (!strcmp(line, "kh") && v >= 0) { KH = v; headTgt = heading; }
   else { Serial.println(F("?")); return; }
   Serial.println(F("ok"));
