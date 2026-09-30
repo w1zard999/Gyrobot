@@ -79,7 +79,8 @@ float KNT  = 2.0f;    // °/с поворота на ° ошибки курса
 float KND  = 0.3f;    // имп/40мс скорости на см до дома (0.5 — тормозил поздно, подъезжал на 20)
 float NTOL = 5;       // см: дома
 #define NAV_YMIN 25   // °/с — меньше тугое колесо не сдвинет
-#define PIV_V 3       // имп/40мс: быстрее — поворот на месте не включать (робот ещё катится)
+#define PIV_V 6       // имп/40мс: к этой скорости усиленный демпфер поворота гаснет до обычного
+#define FACE_V 3      // имп/40мс: доворот дома — только когда робот почти встал
 float TBA  = 1.6f;    // доля поворота левого колеса в повороте на ходу (W+A): левое на полу туже
 
 // ---------- Состояние ----------
@@ -282,14 +283,14 @@ void navTargets(float& mt, float& yt) {
     else yt = navTurn(err, YMAX);
   }
   if (nav == NAV_DRIVE) {
-    if (dist < NTOL || fabs(err) > 90) nav = NAV_FACE;    // дома или проскочили
+    if (dist < NTOL + 1.2f * fabs(vF) || fabs(err) > 90) nav = NAV_FACE;   // тормозной путь / проскочили
     else if (fabs(err) > 45) nav = NAV_TURN;              // сильно сбились — довернуть
     else {
       mt = constrain(KND * dist, 4.0f, MOVE);
       yt = constrain(KNT * err, -40.0f, 40.0f);           // подруливание на ходу
     }
   }
-  if (nav == NAV_FACE && moveSet == 0 && fabs(vF) < PIV_V) {   // довернуть, когда реально встал
+  if (nav == NAV_FACE && moveSet == 0 && fabs(vF) < FACE_V) {  // довернуть, когда реально встал
     float e = wrap180(-odoTh);
     if (fabs(e) < 5) nav = NAV_IDLE;
     else yt = navTurn(e, YMAX);
@@ -363,16 +364,18 @@ void controlTick() {
     odoX += ds * cos(odoTh * 0.0174533f);
     odoY += ds * sin(odoTh * 0.0174533f);
     updateTargets();
-    // поворот на месте (A/D без W/S) — только когда робот почти стоит: на ходу
-    // PKS×KSP×v давал удар до ШИМ 255 и наклон ±28° (доворот дома на скорости 17)
-    pivot = turnSet != 0 && moveSet == 0 && fabs(vF) < PIV_V;
+    pivot = turnSet != 0 && moveSet == 0;                  // поворот на месте (A/D без W/S)
     posI = constrain(posI + vF - moveSet, -ILIM, ILIM);    // положение минус цель
     if (stopping) {                                        // забываем отставание от цели
       float d = posRest - posI;
       posI += constrain(d, -BLEED, BLEED);
       if (fabs(d) <= BLEED && moveSet == 0) stopping = false;
     }
-    speedOut = (pivot ? PKS : 1.0f) * KSP * vF + KSI * posI;   // тот же знак, что у balance
+    // усиленный демпфер поворота на месте плавно гаснет со скоростью: PKS на месте,
+    // 1 при |v| ≥ PIV_V. На ходу PKS×KSP×v давал удар до ШИМ 255 и наклон ±28°,
+    // а жёсткий порог по скорости дёргал поворот (режим то вкл, то выкл)
+    float pk = pivot ? 1.0f + (PKS - 1.0f) * max(0.0f, 1.0f - fabs(vF) / PIV_V) : 1.0f;
+    speedOut = pk * KSP * vF + KSI * posI;                 // тот же знак, что у balance
   }
 
   heading += yawR * dt;
