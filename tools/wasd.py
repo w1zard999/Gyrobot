@@ -116,6 +116,8 @@ ensure_deps()
 import pygame  # noqa: E402
 import serial  # noqa: E402
 from serial.tools import list_ports  # noqa: E402
+import math  # noqa: E402
+from wasdmap import MapView, Trail, parse_pose  # noqa: E402
 
 PORT_CACHE = os.path.join(HERE, '.wasd_port')   # последний рабочий порт — пробуем первым
 RATE = 10.0                                      # букв в секунду (прошивка ждёт 250 мс)
@@ -286,6 +288,8 @@ class Link:
         self.lock = threading.Lock()
         self.last_rx = 0.0
         self.tele = None          # (взведён, наклон, скорость, рыскание)
+        self.pose = None          # (x см, y см, курс °, фаза возврата)
+        self.trail = Trail()
         self.error = ''
         self.t0 = time.time()
         threading.Thread(target=self._reader, daemon=True).start()
@@ -308,6 +312,10 @@ class Link:
             m = self.TELE.match(line)
             if m:
                 self.tele = (m[1] == 'A', float(m[2]), float(m[3]), int(m[4]))
+            pose = parse_pose(line)
+            if pose:
+                self.pose = pose
+                self.trail.add(pose[0], pose[1])
             if self.log:
                 with self.lock:
                     keys = ''.join(sorted(self.held)) or '.'
@@ -329,6 +337,15 @@ class Link:
         try:
             for ch in letters:
                 self.ser.write((ch + '\n').encode())
+        except (serial.SerialException, OSError):
+            self._drop('не удалось отправить')
+
+    def send_cmd(self, cmd):
+        """Одна команда роботу (h, x, home)."""
+        if self.ser is None:
+            return
+        try:
+            self.ser.write((cmd + '\n').encode())
         except (serial.SerialException, OSError):
             self._drop('не удалось отправить')
 
@@ -366,8 +383,59 @@ def draw(screen, fonts, link, held):
         lines = ['телеметрии пока нет']
     for i, s in enumerate(lines):
         screen.blit(small.render(s, True, (220, 220, 220)), (230, 55 + i * 30))
-    screen.blit(small.render('ESC — выход', True, (120, 120, 130)), (16, 200))
+    nav = link.pose[3] if link.pose else 0
+    if nav:
+        x, y = link.pose[0], link.pose[1]
+        phase = {1: 'разворот', 2: 'едет', 3: 'доворот'}.get(nav, '')
+        screen.blit(small.render(f'домой: {phase}, {math.hypot(x, y):.0f} см', True, (240, 200, 90)),
+                    (230, 175))
+    for i, s in enumerate(('W A S D — ехать    H — домой', 'R — дом здесь    C — стереть след',
+                           'ESC — выход')):
+        screen.blit(small.render(s, True, (120, 120, 130)), (16, 330 + i * 26))
+    draw_map(screen, small, link, MAP)
     pygame.display.flip()
+
+
+MAP = pygame.Rect(470, 15, 410, 410)      # квадрат карты справа
+
+
+def draw_map(screen, font, link, rect):
+    """След, дом (крестик) и робот (стрелка по курсу); дом в центре."""
+    pygame.draw.rect(screen, (32, 35, 40), rect, border_radius=8)
+    pose = link.pose
+    pts = list(link.trail.points)
+    view = MapView(rect.width, min_extent=50)
+    view.fit(pts, (pose[0], pose[1]) if pose else (0, 0))
+
+    def scr(x, y):
+        px, py = view.to_screen(x, y)
+        return rect.x + px, rect.y + py
+
+    step = 10 if view.scale * 10 >= 6 else 50           # сетка: 10 см, если не слишком густо
+    n = int(view.extent // step) + 1
+    for i in range(-n, n + 1):
+        col = (58, 62, 70) if (i * step) % 50 else (78, 84, 94)
+        a, b = scr(i * step, -view.extent), scr(i * step, view.extent)
+        c, d = scr(-view.extent, i * step), scr(view.extent, i * step)
+        screen.set_clip(rect)
+        pygame.draw.line(screen, col, a, b)
+        pygame.draw.line(screen, col, c, d)
+        screen.set_clip(None)
+    if len(pts) > 1:
+        pygame.draw.lines(screen, (90, 160, 250), False, [scr(x, y) for x, y in pts], 2)
+    hx, hy = scr(0, 0)                                    # дом
+    pygame.draw.line(screen, (240, 200, 90), (hx - 8, hy - 8), (hx + 8, hy + 8), 3)
+    pygame.draw.line(screen, (240, 200, 90), (hx - 8, hy + 8), (hx + 8, hy - 8), 3)
+    if pose:                                              # робот: треугольник по курсу
+        rx, ry = scr(pose[0], pose[1])
+        th = math.radians(pose[2])                        # 0° — вверх, + — влево
+        tip = (rx - 14 * math.sin(th), ry - 14 * math.cos(th))
+        l = (rx - 8 * math.sin(th + 2.5), ry - 8 * math.cos(th + 2.5))
+        r = (rx - 8 * math.sin(th - 2.5), ry - 8 * math.cos(th - 2.5))
+        pygame.draw.polygon(screen, (110, 200, 120), (tip, l, r))
+    scale_cm = step if step == 50 else 10
+    screen.blit(font.render(f'клетка {scale_cm} см', True, (120, 120, 130)),
+                (rect.x + 8, rect.bottom - 26))
 
 
 def main():
@@ -406,7 +474,7 @@ def run(args):
     link = Link(ser, port, held, log)
 
     pygame.init()
-    screen = pygame.display.set_mode((460, 240))
+    screen = pygame.display.set_mode((895, 440))
     pygame.display.set_caption('Gyrobot WASD')
     face = 'arial,helvetica,dejavusans,liberationsans,notosans'   # с кириллицей
     fonts = (pygame.font.SysFont(face, 30, bold=True), pygame.font.SysFont(face, 20))
@@ -416,6 +484,7 @@ def run(args):
         loop(screen, fonts, clock, link, held)
     finally:                                  # любой выход: ESC, окно, сигнал, ошибка
         pygame.quit()
+        link.send_cmd('x')                    # остановить возврат домой, если шёл
         if link.ser:
             try:
                 link.ser.close()
@@ -439,6 +508,13 @@ def loop(screen, fonts, clock, link, held):
                 elif ev.scancode in KEYMAP:
                     with link.lock:
                         held.add(KEYMAP[ev.scancode])
+                elif ev.scancode == pygame.KSCAN_H:
+                    link.send_cmd('h')                    # домой
+                elif ev.scancode == pygame.KSCAN_R:
+                    link.send_cmd('home')                 # дом здесь
+                    link.trail.clear()
+                elif ev.scancode == pygame.KSCAN_C:
+                    link.trail.clear()
             elif ev.type == pygame.KEYUP and ev.scancode in KEYMAP:
                 with link.lock:
                     held.discard(KEYMAP[ev.scancode])
