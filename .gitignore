@@ -15,3 +15,6 @@ tools/.wasd.lock
 
 # рабочие файлы планов (superpowers)
 .superpowers/
+
+# пароль Wi-Fi камеры — только на самой камере
+tools/openmv/wifi_config.py
