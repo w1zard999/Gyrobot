@@ -15,6 +15,14 @@
 // ============================================================
 #include <Wire.h>
 #include <EEPROM.h>
+#include <SoftwareSerial.h>
+
+// Камера OpenMV: её UART3 TX (P4) -> D12, RX (P5) <- D11, 9600 бод. Аппаратный UART
+// занят HC-05, поэтому программный: на каждый принятый байт ~1 мс без прерываний —
+// энкодеры не теряются (на нашей скорости импульс реже раза в 2.5 мс), но камера
+// должна слать короткие строки, а не поток данных. Сейчас — проверка провода:
+// принятые строки уходят в телеметрию как "cam> ...".
+SoftwareSerial cam(12, 11);           // RX, TX
 
 // ---------- Пины (docs/STATUS.md, прозвонено 2026-09-07) ----------
 #define PWMA 9      // A = левое колесо
@@ -576,6 +584,16 @@ void applyLine(char* line) {
   Serial.println(F("ok"));
 }
 
+void camPoll() {
+  static char line[24]; static uint8_t len = 0;
+  while (cam.available()) {
+    char c = cam.read();
+    if (c == '\n' || c == '\r') {
+      if (len) { line[len] = 0; Serial.print(F("cam> ")); Serial.println(line); len = 0; }
+    } else if (len < sizeof(line) - 1) line[len++] = c;
+  }
+}
+
 void serialPoll() {
   static char line[20]; static uint8_t len = 0;
   while (Serial.available()) {
@@ -621,6 +639,7 @@ void setup() {
 
   Serial.begin(115200);
   cfgInit();
+  cam.begin(9600);
   Wire.begin();
   Wire.setClock(400000);
   Wire.setWireTimeout(25000, true);                      // без этого I2C висел от помех моторов
@@ -643,6 +662,7 @@ void setup() {
 
 void loop() {
   serialPoll();
+  camPoll();
   if ((long)(micros() - tNext) < 0) return;
   tNext += TICK_US;
   if ((long)(micros() - tNext) > (long)TICK_US) tNext = micros();   // отстали — не догонять пачкой
