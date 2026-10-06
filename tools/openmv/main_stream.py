@@ -60,13 +60,26 @@ FRAMES = 0
 CLIENT = "-"
 
 
+def send_all(conn, data):
+    """Wi-Fi-модуль за раз отправляет только часть — досылать, пока не уйдёт всё.
+    Иначе кадр обрезается и браузер замирает на последнем целом кадре."""
+    mv = memoryview(data)
+    while mv:
+        n = conn.send(mv)
+        if not n:
+            raise OSError("send вернул 0")
+        mv = mv[n:]
+
+
 def http_ok(body, ctype=b"text/html; charset=utf-8"):
     return b"HTTP/1.1 200 OK\r\nContent-Type: " + ctype + b"\r\n\r\n" + body
 
 
 PAGE = http_ok(b"<!DOCTYPE html><html><head><title>OpenMV Cam</title></head>"
                b"<body style='text-align:center'><h2>OpenMV Cam</h2>"
-               b"<img src='/stream.jpg' style='max-width:100%'></body></html>")
+               b"<img src='/stream.jpg' style='max-width:100%' "
+               b"onerror=\"setTimeout(()=>this.src='/stream.jpg?'+Date.now(),1000)\">"
+               b"</body></html>")                # поток оборвался — переподключиться
 
 
 def status_page():
@@ -96,19 +109,21 @@ while True:
     try:
         req = conn.recv(1024)
         if b"/stream" in req:
-            conn.send(HDR)
+            send_all(conn, HDR)
             while True:
                 img = csi0.snapshot()
                 if hand_detect:
                     hand_detect.draw(img, hand_detect.detect(img))
-                jpeg = bytes(img.compress(quality=85).bytearray())
-                conn.send(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                          + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
+                jpeg = bytes(img.compress(quality=60).bytearray())   # 85 — кадры крупнее, чаще рвётся
+                send_all(conn, b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                         + str(len(jpeg)).encode() + b"\r\n\r\n")
+                send_all(conn, jpeg)
+                send_all(conn, b"\r\n")
                 FRAMES += 1
         elif b"/status" in req:
-            conn.send(status_page())
+            send_all(conn, status_page())
         else:
-            conn.send(PAGE)
+            send_all(conn, PAGE)
     except OSError as e:
         print("Клиент отключился:", e)
     finally:
