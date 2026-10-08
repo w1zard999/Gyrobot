@@ -2,10 +2,12 @@
 # Сеть и пароль — в wifi_config.py на камере (образец: wifi_config_example.py).
 # Светодиод: синий мигает — ищет сеть, зелёный — поток работает, красный — ошибка.
 # Если сеть не нашлась за 20 с — сдаётся и отпускает камеру (можно подключить IDE).
+import gc
 import socket
 import time
 
 import csi
+import machine
 import network
 from machine import LED
 
@@ -103,35 +105,70 @@ s.bind(("0.0.0.0", 80))
 s.listen(1)
 s.settimeout(1.0)                      # ждать клиентов кусками по 1 с, а не вечно
 
+def die(why):
+    """Неожиданный сбой: записать причину и перезагрузить камеру — через несколько
+    секунд она снова в сети. Раньше программа просто умирала (поток пропадал насовсем,
+    зелёный продолжал гореть): сетевые ошибки ловились, остальные — нет."""
+    print("СБОЙ:", why)
+    try:
+        with open("last_error.txt", "w") as f:
+            f.write("uptime %d s, frames %d: %s\n"
+                    % (time.ticks_diff(time.ticks_ms(), BOOT_MS) // 1000, FRAMES, why))
+    except Exception:
+        pass
+    leds(r=1)
+    time.sleep_ms(500)
+    machine.reset()
+
+
+def serve(conn):
+    global FRAMES
+    conn.settimeout(3.0)               # молчащий/пропавший клиент не вешает сервер
+    req = conn.recv(1024)
+    if b"/stream" in req:
+        send_all(conn, HDR)
+        while True:
+            img = csi0.snapshot()
+            if hand_detect:
+                hand_detect.draw(img, hand_detect.detect(img))
+            jpeg = bytes(img.compress(quality=60).bytearray())   # 85 — кадры крупнее, чаще рвётся
+            send_all(conn, b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                     + str(len(jpeg)).encode() + b"\r\n\r\n")
+            send_all(conn, jpeg)
+            send_all(conn, b"\r\n")
+            FRAMES += 1
+            if FRAMES % 20 == 0:
+                gc.collect()
+    elif b"/status" in req:
+        send_all(conn, status_page())
+    else:
+        send_all(conn, PAGE)
+
+
+idle = 0
 while True:
     try:
         conn, addr = s.accept()
     except OSError:                    # за секунду никого — ждём дальше
+        idle += 1
+        if idle % 5 == 0 and not wlan.isconnected():
+            die("Wi-Fi пропал")
         continue
     CLIENT = str(addr[0])
     print("Клиент:", addr)
     try:
-        # Без таймаута один молчащий клиент вешал сервер навсегда: браузеры открывают
-        # «запасные» соединения и ничего не шлют; пропавший клиент блокировал отправку
-        conn.settimeout(3.0)
-        req = conn.recv(1024)
-        if b"/stream" in req:
-            send_all(conn, HDR)
-            while True:
-                img = csi0.snapshot()
-                if hand_detect:
-                    hand_detect.draw(img, hand_detect.detect(img))
-                jpeg = bytes(img.compress(quality=60).bytearray())   # 85 — кадры крупнее, чаще рвётся
-                send_all(conn, b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                         + str(len(jpeg)).encode() + b"\r\n\r\n")
-                send_all(conn, jpeg)
-                send_all(conn, b"\r\n")
-                FRAMES += 1
-        elif b"/status" in req:
-            send_all(conn, status_page())
-        else:
-            send_all(conn, PAGE)
-    except OSError as e:
+        serve(conn)
+    except OSError as e:               # клиент ушёл или замолчал — обычное дело
         print("Клиент отключился:", e)
+    except Exception as e:             # сенсор, память, что угодно — перезапуск
+        try:
+            conn.close()
+        except Exception:
+            pass
+        die("%s: %s" % (type(e).__name__, e))
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+        gc.collect()
