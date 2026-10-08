@@ -111,6 +111,9 @@ while True:
     CLIENT = str(addr[0])
     print("Клиент:", addr)
     try:
+        # Без таймаута один молчащий клиент вешал сервер навсегда: браузеры открывают
+        # «запасные» соединения и ничего не шлют; пропавший клиент блокировал отправку
+        conn.settimeout(3.0)
         req = conn.recv(1024)
         if b"/stream" in req:
             send_all(conn, HDR)
