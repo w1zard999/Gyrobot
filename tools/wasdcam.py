@@ -1,6 +1,6 @@
 """Видео с камеры OpenMV для клиента WASD: поиск камеры в сети, чтение MJPEG-потока.
 
-Камера (tools/openmv/main_stream.py) отдаёт http://<ip>/stream.jpg — поток частей
+Камера (tools/openmv/main_ball.py) отдаёт http://<ip>/stream.jpg — поток частей
 "--frame ... Content-Length: N" + JPEG. Обслуживает одного зрителя за раз.
 """
 import concurrent.futures

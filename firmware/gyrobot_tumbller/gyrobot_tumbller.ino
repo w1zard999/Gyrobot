@@ -17,11 +17,12 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
 
-// Камера OpenMV: её UART3 TX (P4) -> D12, RX (P5) <- D11, 9600 бод. Аппаратный UART
-// занят HC-05, поэтому программный: на каждый принятый байт ~1 мс без прерываний —
+// Камера OpenMV: её UART3 TX (P4) -> D12, RX (P5) <- D11, 19200 бод. Аппаратный UART
+// занят HC-05, поэтому программный: на каждый принятый байт ~0.5 мс без прерываний —
 // энкодеры не теряются (на нашей скорости импульс реже раза в 2.5 мс), но камера
-// должна слать короткие строки, а не поток данных. Сейчас — проверка провода:
-// принятые строки уходят в телеметрию как "cam> ...".
+// должна слать короткие строки, а не поток данных. Камера (tools/openmv/main_ball.py)
+// 10 раз/с шлёт "b<x>,<размер>" — мяч виден — или "n"; прочие строки уходят в
+// телеметрию как "cam> ...".
 SoftwareSerial cam(12, 11);           // RX, TX
 
 // ---------- Пины (docs/STATUS.md, прозвонено 2026-09-07) ----------
@@ -82,7 +83,7 @@ float KWI  = 0.5f;    // И: ШИМ за 40 мс на имп — П оставл
 float FLA  = 10;      // прямая подача лишнего трения левого колеса, ШИМ (в воздухе моторы равны)
 float PKS  = 3.0f;    // множитель KSP в повороте: 0.5 хуже, 1.5/2.5 лучше, 3 — выбрано, 4 качка
 // Возврат домой по прямой: TURN — к дому, DRIVE — ехать, FACE — в исходный курс
-enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE };
+enum { NAV_IDLE, NAV_TURN, NAV_DRIVE, NAV_FACE, NAV_BALL };
 uint8_t nav = NAV_IDLE;
 bool faceGo = false;                  // доворот дома начался
 uint32_t navStart = 0;                // когда начат возврат
@@ -94,6 +95,18 @@ float FTOL = 2;       // °: доворот в исходный курс (5 — 
 #define NAV_YMIN 25   // °/с — меньше тугое колесо не сдвинет
 #define PIV_V 6       // имп/40мс: к этой скорости усиленный демпфер поворота гаснет до обычного
 #define FACE_V 3      // имп/40мс: доворот дома — только когда робот почти встал
+// ---------- За мячом (команда g): камера даёт смещение и размер мяча в кадре ----------
+float BW   = 60;      // размер мяча в кадре, пикс, на нужной дистанции (больше — подъедет ближе)
+float KBD  = 10;      // имп/40мс скорости на единицу ошибки дальности (мяч вдвое дальше = 1)
+float BMAX = 8;       // потолок скорости за мячом, имп/40мс
+#define BALL_DPP 0.22f  // ° на пиксель кадра 320: объектив ~70° по горизонтали
+#define BALL_LAT 0.06f  // с: кадр старше гироскопа на столько — курс берём «тогдашний»
+#define BALL_MS 500     // столько без сообщений камеры — мяча нет
+int16_t ballX = 0, ballW = 0;         // последнее сообщение: смещение и размер, пикс; 0 — не виден
+uint32_t ballMs = 0;                  // когда оно пришло
+float ballHd = 0;                     // курс на мяч в осях heading: камера задаёт цель,
+                                      // доворачивает гироскоп (200 Гц), а не 10 кадров/с
+bool ballTurn = false, ballGo = false;   // идёт доворот / езда (пороги с гистерезисом)
 float TBA  = 1.6f;    // доля поворота левого колеса в повороте на ходу (W+A): левое на полу туже
 
 // ---------- Состояние ----------
@@ -285,8 +298,24 @@ float navTurn(float err, float lim) {         // поворот с мин. ск�
 }
 
 // Раз в 40 мс: цели скорости (имп/40мс) и поворота (°/с) для возврата
+bool ballFresh() { return ballW && millis() - ballMs < BALL_MS; }
+
+// За мячом: держать его по центру кадра и на дистанции, где его размер = BW.
+// Мяча нет (или камера молчит) — стоять и ждать.
+void ballTargets(float& mt, float& yt) {
+  if (!ballFresh()) { ballTurn = ballGo = false; return; }
+  float e = ballHd - heading;                            // + — мяч левее
+  float far = BW / ballW - 1.0f;                         // + — мяч дальше нужного
+  if (fabs(far) > (ballGo ? 0.1f : 0.25f)) { ballGo = true; mt = constrain(KBD * far, -BMAX, BMAX); }
+  else ballGo = false;
+  if (ballGo) { ballTurn = false; yt = constrain(KNT * e, -40.0f, 40.0f); }   // подруливание на ходу
+  else if (fabs(e) > (ballTurn ? FTOL : 6.0f)) { ballTurn = true; yt = navTurn(e, YMAX); }
+  else ballTurn = false;
+}
+
 void navTargets(float& mt, float& yt) {
   mt = 0; yt = 0;
+  if (nav == NAV_BALL) { ballTargets(mt, yt); return; }
   float dx = -odoX * 0.1f, dy = -odoY * 0.1f;           // см до дома
   float dist = sqrt(dx * dx + dy * dy);
   float err = wrap180(atan2(dy, dx) * 57.2958f - odoTh); // куда повернуть к дому
@@ -316,11 +345,12 @@ void updateTargets() {                                   // раз в 40 мс
   int fwd = (int)held(tW) - (int)held(tS);
   int lr  = (int)held(tA) - (int)held(tD);
   if (fwd || lr) nav = NAV_IDLE;                          // человек перехватил управление
-  if (nav && millis() - navStart > NAV_MAX_MS) nav = NAV_IDLE;   // не бесконечно (стена, BT пропал)
+  if (nav && nav != NAV_BALL && millis() - navStart > NAV_MAX_MS) nav = NAV_IDLE;   // не бесконечно (стена, BT пропал)
   float mt, yt;
   if (nav) navTargets(mt, yt);
   else { mt = fwd * MOVE; yt = lr * YMAX; }
   int8_t drv = fwd ? fwd : (nav == NAV_DRIVE ? 1 : 0);   // езда: клавишей или автоматом
+  if (nav == NAV_BALL) drv = (mt > 0) - (mt < 0);       // за мячом — и назад тоже
   if (drv && !lastFwd && !stopping) posRest = posI;     // начало езды: запомнить стоянку
   if (drv) stopping = false;
   else if (lastFwd) stopping = true;                    // конец езды
@@ -426,7 +456,7 @@ void controlTick() {
 // новые значения из кода). Повреждённая или пустая память — тоже заводские.
 float* const CFG[] = {&KP, &KD, &KSP, &KSI, &ILIM, &KT, &TFF, &KH, &YMAX, &MOVE, &AZ,
                       &DBA, &DBB, &FALL, &RAMP_UP, &RAMP_DN, &BLEED, &KW, &KWI, &FLA,
-                      &PKS, &TBA, &KNT, &KND, &NTOL, &FTOL};
+                      &PKS, &TBA, &KNT, &KND, &NTOL, &FTOL, &BW, &KBD, &BMAX};
 const uint8_t CFG_N = sizeof(CFG) / sizeof(CFG[0]);
 #define CFG_MAGIC 0x4731              // «G1»
 float cfgFactory[CFG_N];              // заводские значения этой прошивки (копия при старте)
@@ -512,7 +542,10 @@ void printParams() {
   Serial.print(F(" knt=")); Serial.print(KNT, 2);
   Serial.print(F(" knd=")); Serial.print(KND, 2);
   Serial.print(F(" ntol=")); Serial.print(NTOL, 0);
-  Serial.print(F(" ftol=")); Serial.println(FTOL, 1);
+  Serial.print(F(" ftol=")); Serial.print(FTOL, 1);
+  Serial.print(F(" bw=")); Serial.print(BW, 0);
+  Serial.print(F(" kbd=")); Serial.print(KBD, 1);
+  Serial.print(F(" bmax=")); Serial.println(BMAX, 1);
 
 }
 
@@ -539,7 +572,8 @@ void applyLine(char* line) {
   uint32_t now = millis();
 
   if (!strcmp(line, "h")) { if (armed) { nav = NAV_TURN; faceGo = false; navStart = millis(); } return; }   // домой
-  if (!strcmp(line, "x")) { nav = NAV_IDLE; return; }                // стоп возврата
+  if (!strcmp(line, "x")) { nav = NAV_IDLE; return; }                // стоп возврата и езды за мячом
+  if (!strcmp(line, "g")) { if (armed) { nav = NAV_BALL; ballTurn = ballGo = false; } return; }   // за мячом
   if (!line[1] && strchr("wsad", line[0])) {             // буквы WASD — без ответа
     if (line[0] == 'w') tW = now; else if (line[0] == 's') tS = now;
     else if (line[0] == 'a') tA = now; else tD = now;
@@ -580,9 +614,23 @@ void applyLine(char* line) {
   else if (!strcmp(line, "knd") && v > 0) KND = v;
   else if (!strcmp(line, "ntol") && v > 0) NTOL = v;
   else if (!strcmp(line, "ftol") && v > 0) FTOL = v;
+  else if (!strcmp(line, "bw") && v > 0) BW = v;
+  else if (!strcmp(line, "kbd") && v > 0) KBD = v;
+  else if (!strcmp(line, "bmax") && v > 0) BMAX = v;
   else if (!strcmp(line, "kh") && v >= 0) { KH = v; headTgt = heading; }
   else { Serial.println(F("?")); return; }
   Serial.println(F("ok"));
+}
+
+void camLine(char* line) {
+  char* c = strchr(line, ',');
+  if (line[0] == 'b' && c) {                             // "b<x>,<размер>"
+    int x = atoi(line + 1), w = atoi(c + 1);
+    if (w < 1 || w > 320 || abs(x) > 160) return;        // битая строка
+    ballX = x; ballW = w; ballMs = millis();
+    ballHd = heading - yawR * BALL_LAT - BALL_DPP * x;   // мяч правее (x > 0) — курс меньше
+  } else if (line[0] == 'n' && !line[1]) { ballW = 0; ballMs = millis(); }
+  else { Serial.print(F("cam> ")); Serial.println(line); }
 }
 
 void camPoll() {
@@ -590,7 +638,7 @@ void camPoll() {
   while (cam.available()) {
     char c = cam.read();
     if (c == '\n' || c == '\r') {
-      if (len) { line[len] = 0; Serial.print(F("cam> ")); Serial.println(line); len = 0; }
+      if (len) { line[len] = 0; camLine(line); len = 0; }
     } else if (len < sizeof(line) - 1) line[len++] = c;
   }
 }
@@ -622,6 +670,9 @@ void telemetry() {                                       // ~10 Гц
   Serial.print(F(" py=")); Serial.print(odoY * 0.1f, 0);
   Serial.print(F(" ph=")); Serial.print(odoTh, 0);
   Serial.print(F(" nav=")); Serial.print(nav);
+  Serial.print(F(" b="));                                // мяч: смещение/размер или "-"
+  if (ballFresh()) { Serial.print(ballX); Serial.print('/'); Serial.print(ballW); }
+  else Serial.print('-');
   Serial.print(F(" hz=")); Serial.print(hz);
   Serial.print(F(" ie=")); Serial.println(imuErr);
 }
@@ -640,7 +691,7 @@ void setup() {
 
   Serial.begin(115200);
   cfgInit();
-  cam.begin(9600);
+  cam.begin(19200);
   Wire.begin();
   Wire.setClock(400000);
   Wire.setWireTimeout(25000, true);                      // без этого I2C висел от помех моторов

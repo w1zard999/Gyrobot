@@ -125,6 +125,7 @@ CAM_CACHE = os.path.join(HERE, '.wasd_cam')     # последний адрес 
 PORT_CACHE = os.path.join(HERE, '.wasd_port')   # последний рабочий порт — пробуем первым
 RATE = 10.0                                      # букв в секунду (прошивка ждёт 250 мс)
 CMS_PER_UNIT = 0.694 / 0.4                      # v в телеметрии — имп/40мс; 0.694 мм/имп (рулетка)
+NAV_BALL = 4                                     # nav= в телеметрии: едет за мячом
 
 # физические клавиши (SDL scancode) -> буква протокола
 KEYMAP = {
@@ -286,6 +287,7 @@ def find_robot(port_arg):
 class Link:
     """Порт + поток чтения телеметрии в лог и в последнее состояние."""
     TELE = re.compile(r'^(A|-) a=(-?[\d.]+) r=\S+ v=(-?[\d.]+).*?yr=(-?\d+)')
+    BALL = re.compile(r' b=(-?\d+)/(\d+)')      # мяч в кадре: смещение/размер
 
     def __init__(self, ser, port, held, log):
         self.ser, self.port, self.held, self.log = ser, port, held, log
@@ -293,6 +295,7 @@ class Link:
         self.last_rx = 0.0
         self.tele = None          # (взведён, наклон, скорость, рыскание)
         self.pose = None          # (x см, y см, курс °, фаза возврата)
+        self.ball = None          # (смещение, размер) мяча в кадре, пикс; None — не виден
         self.trail = Trail()
         self.error = ''
         self.t0 = time.time()
@@ -316,6 +319,9 @@ class Link:
             m = self.TELE.match(line)
             if m:
                 self.tele = (m[1] == 'A', float(m[2]), float(m[3]), int(m[4]))
+            if m:
+                b = self.BALL.search(line)
+                self.ball = (int(b[1]), int(b[2])) if b else None
             pose = parse_pose(line)
             if pose:
                 self.pose = pose
@@ -345,7 +351,7 @@ class Link:
             self._drop('не удалось отправить')
 
     def send_cmd(self, cmd):
-        """Одна команда роботу (h, x, home)."""
+        """Одна команда роботу (h, x, home, g)."""
         if self.ser is None:
             return
         try:
@@ -388,14 +394,17 @@ def draw(screen, fonts, link, held, cam=None):
     for i, s in enumerate(lines):
         screen.blit(small.render(s, True, (220, 220, 220)), (230, 55 + i * 30))
     nav = link.pose[3] if link.pose else 0
-    if nav:
+    if nav == NAV_BALL:
+        seen = 'вижу, %+d / %d пикс' % link.ball if link.ball else 'не вижу, жду'
+        screen.blit(small.render(f'за мячом: {seen}', True, (240, 120, 100)), (230, 175))
+    elif nav:
         x, y = link.pose[0], link.pose[1]
         phase = {1: 'разворот', 2: 'едет', 3: 'доворот'}.get(nav, '')
         screen.blit(small.render(f'домой: {phase}, {math.hypot(x, y):.0f} см', True, (240, 200, 90)),
                     (230, 175))
     draw_video(screen, small, cam, VIDEO)
     for i, s in enumerate(('W A S D — ехать    H — домой    ESC — выход',
-                           'R — дом здесь    C — стереть след')):
+                           'F — за мячом    R — дом здесь    C — стереть след')):
         screen.blit(small.render(s, True, (120, 120, 130)), (16, 472 + i * 24))
     draw_map(screen, small, link, MAP)
     pygame.display.flip()
@@ -555,6 +564,9 @@ def loop(screen, fonts, clock, link, held, cam=None):
                         held.add(KEYMAP[ev.scancode])
                 elif ev.scancode == pygame.KSCAN_H:
                     link.send_cmd('h')                    # домой
+                elif ev.scancode == pygame.KSCAN_F:       # за мячом: вкл / выкл
+                    following = link.pose and link.pose[3] == NAV_BALL
+                    link.send_cmd('x' if following else 'g')
                 elif ev.scancode == pygame.KSCAN_R:
                     link.send_cmd('home')                 # дом здесь
                     link.trail.clear()
