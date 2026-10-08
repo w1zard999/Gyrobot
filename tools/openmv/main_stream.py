@@ -121,6 +121,22 @@ def die(why):
     machine.reset()
 
 
+def mark_hands(img):
+    """Рамки вокруг рук. Ошибка в распознавании не должна ронять поток: один раз
+    записываем причину и дальше показываем видео без рамок."""
+    global hand_detect
+    try:
+        hand_detect.draw(img, hand_detect.detect(img))
+    except Exception as e:
+        print("hand_detect отключён:", type(e).__name__, e)
+        try:
+            with open("last_error.txt", "w") as f:
+                f.write("hand_detect отключён: %s: %s\n" % (type(e).__name__, e))
+        except Exception:
+            pass
+        hand_detect = None
+
+
 def serve(conn):
     global FRAMES
     conn.settimeout(3.0)               # молчащий/пропавший клиент не вешает сервер
@@ -130,7 +146,7 @@ def serve(conn):
         while True:
             img = csi0.snapshot()
             if hand_detect:
-                hand_detect.draw(img, hand_detect.detect(img))
+                mark_hands(img)
             jpeg = bytes(img.compress(quality=60).bytearray())   # 85 — кадры крупнее, чаще рвётся
             send_all(conn, b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
                      + str(len(jpeg)).encode() + b"\r\n\r\n")
