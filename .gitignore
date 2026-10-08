@@ -18,3 +18,4 @@ tools/.wasd.lock
 
 # пароль Wi-Fi камеры — только на самой камере
 tools/openmv/wifi_config.py
+tools/.wasd_cam

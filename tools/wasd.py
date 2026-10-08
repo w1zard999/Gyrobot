@@ -117,8 +117,11 @@ import pygame  # noqa: E402
 import serial  # noqa: E402
 from serial.tools import list_ports  # noqa: E402
 import math  # noqa: E402
+import io  # noqa: E402
+from wasdcam import CamStream  # noqa: E402
 from wasdmap import MapView, Trail, parse_pose  # noqa: E402
 
+CAM_CACHE = os.path.join(HERE, '.wasd_cam')     # последний адрес камеры
 PORT_CACHE = os.path.join(HERE, '.wasd_port')   # последний рабочий порт — пробуем первым
 RATE = 10.0                                      # букв в секунду (прошивка ждёт 250 мс)
 CMS_PER_UNIT = 0.694 / 0.4                      # v в телеметрии — имп/40мс; 0.694 мм/имп (рулетка)
@@ -359,7 +362,7 @@ class Link:
 
 
 # ---------- окно ----------
-def draw(screen, fonts, link, held):
+def draw(screen, fonts, link, held, cam=None):
     big, small = fonts
     screen.fill((24, 26, 30))
     online = link.ser is not None and time.time() - link.last_rx < 1.5
@@ -390,14 +393,49 @@ def draw(screen, fonts, link, held):
         phase = {1: 'разворот', 2: 'едет', 3: 'доворот'}.get(nav, '')
         screen.blit(small.render(f'домой: {phase}, {math.hypot(x, y):.0f} см', True, (240, 200, 90)),
                     (230, 175))
-    for i, s in enumerate(('W A S D — ехать    H — домой', 'R — дом здесь    C — стереть след',
-                           'ESC — выход')):
-        screen.blit(small.render(s, True, (120, 120, 130)), (16, 330 + i * 26))
+    draw_video(screen, small, cam, VIDEO)
+    for i, s in enumerate(('W A S D — ехать    H — домой    ESC — выход',
+                           'R — дом здесь    C — стереть след')):
+        screen.blit(small.render(s, True, (120, 120, 130)), (16, 472 + i * 24))
     draw_map(screen, small, link, MAP)
     pygame.display.flip()
 
 
-MAP = pygame.Rect(470, 15, 410, 410)      # квадрат карты справа
+VIDEO = pygame.Rect(16, 215, 320, 240)    # видео с камеры под клавишами
+_video = {'seq': -1, 'surf': None}        # последний декодированный кадр
+
+
+def draw_video(screen, font, cam, rect):
+    """Кадр с камеры; JPEG декодируется только когда пришёл новый."""
+    pygame.draw.rect(screen, (32, 35, 40), rect, border_radius=8)
+    if cam is None:
+        msg = 'видео выключено (--no-cam)'
+    else:
+        jpeg, seq = cam.frame, cam.seq
+        if jpeg is None:
+            _video['surf'] = None
+        elif seq != _video['seq']:
+            try:
+                surf = pygame.image.load(io.BytesIO(jpeg))
+                if surf.get_size() != rect.size:
+                    surf = pygame.transform.scale(surf, rect.size)
+                _video['surf'], _video['seq'] = surf, seq
+            except pygame.error:              # битый кадр — оставить прошлый
+                pass
+        msg = cam.state
+    if cam is not None and _video['surf'] is not None:
+        screen.blit(_video['surf'], rect.topleft)
+        label = font.render(msg, True, (230, 230, 230))
+        bg = pygame.Surface((label.get_width() + 8, label.get_height()), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 120))
+        screen.blit(bg, (rect.x, rect.bottom - label.get_height()))
+        screen.blit(label, (rect.x + 4, rect.bottom - label.get_height()))
+    else:
+        label = font.render(msg, True, (120, 120, 130))
+        screen.blit(label, (rect.centerx - label.get_width() // 2, rect.centery - 10))
+
+
+MAP = pygame.Rect(470, 30, 410, 410)      # квадрат карты справа
 
 
 def draw_map(screen, font, link, rect):
@@ -443,6 +481,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--port', help='порт робота; без него ищется сам')
     ap.add_argument('--no-log', action='store_true', help='не писать телеметрию в tools/logs')
+    ap.add_argument('--cam', help='IP камеры OpenMV; без него ищется сама в локальной сети')
+    ap.add_argument('--no-cam', action='store_true', help='не показывать видео с камеры')
     args = ap.parse_args()
 
     take_lock()
@@ -473,19 +513,23 @@ def run(args):
 
     held = set()
     link = Link(ser, port, held, log)
+    # видео идёт отдельным потоком и на управление не влияет: нет камеры — заглушка
+    cam = None if args.no_cam else CamStream(ip=args.cam, cache_path=CAM_CACHE)
 
     pygame.init()
-    screen = pygame.display.set_mode((895, 440))
+    screen = pygame.display.set_mode((895, 530))
     pygame.display.set_caption('Gyrobot WASD')
     face = 'arial,helvetica,dejavusans,liberationsans,notosans'   # с кириллицей
     fonts = (pygame.font.SysFont(face, 30, bold=True), pygame.font.SysFont(face, 20))
     clock = pygame.time.Clock()
 
     try:
-        loop(screen, fonts, clock, link, held)
+        loop(screen, fonts, clock, link, held, cam)
     finally:                                  # любой выход: ESC, окно, сигнал, ошибка
         pygame.quit()
         link.send_cmd('x')                    # остановить возврат домой, если шёл
+        if cam:
+            cam.stop()
         if link.ser:
             try:
                 link.ser.close()
@@ -496,7 +540,7 @@ def run(args):
     print('Выход: буквы больше не шлются, робот остановится и будет стоять.')
 
 
-def loop(screen, fonts, clock, link, held):
+def loop(screen, fonts, clock, link, held, cam=None):
     next_send = next_retry = 0.0
     running = True
     while running:
@@ -533,7 +577,7 @@ def loop(screen, fonts, clock, link, held):
             next_retry = now + 2.0
             link.reconnect()
 
-        draw(screen, fonts, link, held)
+        draw(screen, fonts, link, held, cam)
         clock.tick(30)
 
 
