@@ -10,6 +10,7 @@
 #   /            видео с рамкой на мяче          /status   состояние
 #   /color       цвет в центре кадра (LAB) и текущий порог — поставь мяч в центр
 #   /thr?v=Lmin,Lmax,Amin,Amax,Bmin,Bmax         задать порог и запомнить (ball_thr.txt)
+#   /thr2?v=...  второй диапазон — мяч в тени (ball_thr2.txt);  /thr2?v=off — убрать
 # Клиент у Wi-Fi-модуля один: пока кто-то смотрит видео, страницы не открываются.
 # Сеть и пароль — в wifi_config.py на камере (образец: wifi_config_example.py).
 # Светодиод: синий — сети нет (мяч всё равно ищется), зелёный — сеть есть, красный — сбой.
@@ -25,9 +26,12 @@ from machine import LED, UART
 import wifi_config
 
 W, H = 320, 240
-THR_FILE = "ball_thr.txt"
 THR = [10, 70, 25, 80, -5, 50]         # красный мяч, LAB; подобрано по кадру 2026-10-08:
                                        # мяч A 34..45, стол/стена/тень — A не выше 21
+THR2 = [5, 32, 16, 60, -2, 30]         # второй диапазон: тот же мяч в тени (по 10 кадрам
+                                       # 2026-10-09: тёмный мяч L 10..30, A 18..36; рука, обувь,
+                                       # пол в него не попали). Пусто — выключен
+THR_FILES = ((THR, "ball_thr.txt"), (THR2, "ball_thr2.txt"))
 SEND_MS = 100                          # роботу — 10 раз/с: каждый байт стоит ему 0.5 мс
 
 R, G, B = LED("LED_RED"), LED("LED_GREEN"), LED("LED_BLUE")
@@ -37,17 +41,18 @@ def leds(r=0, g=0, b=0):
     (R.on if r else R.off)(); (G.on if g else G.off)(); (B.on if b else B.off)()
 
 
-def load_thr():
+def thresholds():
+    return [tuple(t) for t in (THR, THR2) if t]
+
+
+for thr, name in THR_FILES:
     try:
-        with open(THR_FILE) as f:
+        with open(name) as f:
             v = [int(x) for x in f.read().split(",")]
         if len(v) == 6:
-            THR[:] = v
+            thr[:] = v
     except (OSError, ValueError):
-        pass                           # файла нет или испорчен — порог из кода
-
-
-load_thr()
+        pass                           # файла нет, пуст или испорчен — как в коде
 try:                                   # причина прошлого сбоя — видна на /status без USB
     with open("last_error.txt") as f:
         LAST_ERROR = f.read().strip()
@@ -89,7 +94,7 @@ def find_ball(img):
     номера остальных полей в этой прошивке другие — [5], [6] оказались не центром,
     и робот «доворачивался» на число, не связанное с мячом."""
     best = None
-    for b in img.find_blobs([tuple(THR)], pixels_threshold=40, area_threshold=40, merge=True):
+    for b in img.find_blobs(thresholds(), pixels_threshold=40, area_threshold=40, merge=True):
         if best is None or b[2] * b[3] > best[2] * best[3]:
             best = (b[0], b[1], b[2], b[3])
     return best
@@ -166,27 +171,30 @@ def color_page():
         out += "%s: min %d  max %d  quartiles %d..%d  mean %d\n" % (
             c.upper(), val(c + "_min"), val(c + "_max"), val(c + "_lq"), val(c + "_uq"),
             val(c + "_mean"))
-    out += "threshold: %s\nball: %s\nfps: %.0f\n" % (
-        ",".join(str(v) for v in THR), ball_text(), FPS)
+    out += "threshold: %s\nthreshold2: %s\nball: %s\nfps: %.0f\n" % (
+        ",".join(str(v) for v in THR), ",".join(str(v) for v in THR2) or "off",
+        ball_text(), FPS)
     return http_ok(out.encode(), b"text/plain; charset=utf-8")
 
 
-def set_thr(path):
+def set_thr(path, thr, name):
+    """Задать диапазон из ?v=... и запомнить в файле; v=off — выключить (пустой файл)."""
     try:
-        v = [int(x) for x in path.split(b"v=")[1].split(b"&")[0].split(b",")]
-        if len(v) != 6:
+        arg = path.split(b"v=")[1].split(b"&")[0]
+        v = [] if arg == b"off" and thr is THR2 else [int(x) for x in arg.split(b",")]
+        if len(v) not in (0, 6) or (not v and thr is THR):
             raise ValueError
     except (IndexError, ValueError):
-        return http_ok(b"need /thr?v=Lmin,Lmax,Amin,Amax,Bmin,Bmax\n", b"text/plain")
-    THR[:] = v
+        return http_ok(b"need ?v=Lmin,Lmax,Amin,Amax,Bmin,Bmax\n", b"text/plain")
+    thr[:] = v
     text = ",".join(str(x) for x in v)
     try:
-        with open(THR_FILE, "w") as f:
+        with open(name, "w") as f:
             f.write(text)
         saved = "saved"
     except OSError as e:
         saved = "NOT saved: %s" % e
-    return http_ok(("threshold %s, %s\n" % (text, saved)).encode(), b"text/plain")
+    return http_ok(("%s: %s, %s\n" % (name, text or "off", saved)).encode(), b"text/plain")
 
 
 def poll_clients():
@@ -217,8 +225,10 @@ def poll_clients():
             send_all(conn, status_page())
         elif path.startswith(b"/color"):
             send_all(conn, color_page())
+        elif path.startswith(b"/thr2"):
+            send_all(conn, set_thr(path, *THR_FILES[1]))
         elif path.startswith(b"/thr"):
-            send_all(conn, set_thr(path))
+            send_all(conn, set_thr(path, *THR_FILES[0]))
         else:
             send_all(conn, PAGE)
     except OSError as e:
