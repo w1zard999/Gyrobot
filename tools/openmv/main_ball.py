@@ -84,12 +84,14 @@ ball = None                            # (x от центра, размер) п�
 
 
 def find_ball(img):
-    """Самое крупное пятно цвета мяча. Поля пятна — по номерам: в разных прошивках
-    pixels/rect то методы, то значения. [0..3] рамка, [4] пикселей, [5] центр x."""
+    """Самое крупное пятно цвета мяча: рамка (x, y, w, h) или None. Из пятна берём
+    только рамку [0..3]: имена полей в разных прошивках то методы, то значения, а
+    номера остальных полей в этой прошивке другие — [5], [6] оказались не центром,
+    и робот «доворачивался» на число, не связанное с мячом."""
     best = None
     for b in img.find_blobs([tuple(THR)], pixels_threshold=40, area_threshold=40, merge=True):
-        if best is None or b[4] > best[4]:
-            best = b
+        if best is None or b[2] * b[3] > best[2] * best[3]:
+            best = (b[0], b[1], b[2], b[3])
     return best
 
 
@@ -273,7 +275,7 @@ def main():
     while True:
         img = csi0.snapshot()
         b = find_ball(img)
-        ball = (b[5] - W // 2, max(b[2], b[3])) if b else None
+        ball = (b[0] + b[2] // 2 - W // 2, max(b[2], b[3])) if b else None
         now = time.ticks_ms()
         if time.ticks_diff(now, last_tx) >= SEND_MS:
             last_tx = now
@@ -289,8 +291,8 @@ def main():
         if viewer:
             if b:
                 # координаты — одним набором: по отдельности эта прошивка не принимает
-                img.draw_rectangle((b[0], b[1], b[2], b[3]), color=(0, 255, 0), thickness=2)
-                img.draw_cross((b[5], b[6]), color=(0, 255, 0))
+                img.draw_rectangle(b, color=(0, 255, 0), thickness=2)
+                img.draw_cross((b[0] + b[2] // 2, b[1] + b[3] // 2), color=(0, 255, 0))
             try:
                 send_frame(img)
             except OSError as e:       # зритель ушёл или замолчал — обычное дело

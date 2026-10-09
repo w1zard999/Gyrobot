@@ -96,10 +96,11 @@ float FTOL = 2;       // °: доворот в исходный курс (5 — 
 #define PIV_V 6       // имп/40мс: к этой скорости усиленный демпфер поворота гаснет до обычного
 #define FACE_V 3      // имп/40мс: доворот дома — только когда робот почти встал
 // ---------- За мячом (команда g): камера даёт смещение и размер мяча в кадре ----------
-float BW   = 60;      // размер мяча в кадре, пикс, на нужной дистанции (больше — подъедет ближе)
+float BW   = 60;      // размер мяча в кадре, пикс, на нужной дистанции (больше — подъедет
+                      // ближе); замер по рулетке: мяч в 68 см — 23 пикс; при 45 вставал в 40 см
 float KBD  = 10;      // имп/40мс скорости на единицу ошибки дальности (мяч вдвое дальше = 1)
 float BMAX = 8;       // потолок скорости за мячом, имп/40мс
-#define BALL_DPP 0.22f  // ° на пиксель кадра 320: объектив ~70° по горизонтали
+#define BALL_DPP 0.18f  // ° на пиксель кадра 320: замер 5.5–5.8 пикс/° (2026-10-09)
 #define BALL_LAT 0.06f  // с: кадр старше гироскопа на столько — курс берём «тогдашний»
 #define BALL_MS 500     // столько без сообщений камеры — мяча нет
 int16_t ballX = 0, ballW = 0;         // последнее сообщение: смещение и размер, пикс; 0 — не виден
@@ -304,7 +305,7 @@ bool ballFresh() { return ballW && millis() - ballMs < BALL_MS; }
 // Мяча нет (или камера молчит) — стоять и ждать.
 void ballTargets(float& mt, float& yt) {
   if (!ballFresh()) { ballTurn = ballGo = false; return; }
-  float e = ballHd - heading;                            // + — мяч левее
+  float e = ballHd - heading;                            // ошибка курса на мяч, °
   float far = BW / ballW - 1.0f;                         // + — мяч дальше нужного
   if (fabs(far) > (ballGo ? 0.1f : 0.25f)) { ballGo = true; mt = constrain(KBD * far, -BMAX, BMAX); }
   else ballGo = false;
@@ -628,7 +629,9 @@ void camLine(char* line) {
     int x = atoi(line + 1), w = atoi(c + 1);
     if (w < 1 || w > 320 || abs(x) > 160) return;        // битая строка
     ballX = x; ballW = w; ballMs = millis();
-    ballHd = heading - yawR * BALL_LAT - BALL_DPP * x;   // мяч правее (x > 0) — курс меньше
+    // замер 2026-10-09: курс +25° — мяч уезжает в кадре на +145 пикс (вправо),
+    // курс −17° — на −93. Значит мяч с x > 0 — это курс меньше текущего
+    ballHd = heading - yawR * BALL_LAT - BALL_DPP * x;
   } else if (line[0] == 'n' && !line[1]) { ballW = 0; ballMs = millis(); }
   else { Serial.print(F("cam> ")); Serial.println(line); }
 }
@@ -639,7 +642,8 @@ void camPoll() {
     char c = cam.read();
     if (c == '\n' || c == '\r') {
       if (len) { line[len] = 0; camLine(line); len = 0; }
-    } else if (len < sizeof(line) - 1) line[len++] = c;
+    } else if (c < 32 || c > 126) len = 0;               // помеха на проводе — строка с начала
+    else if (len < sizeof(line) - 1) line[len++] = c;
   }
 }
 
